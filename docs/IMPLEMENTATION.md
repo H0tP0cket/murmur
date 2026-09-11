@@ -1,6 +1,6 @@
 # Implementation milestones
 
-This is the intended build order, not a record of completed implementation. The user requested remaining clarification before starting the build goal loop.
+The build goal is active. This document lists acceptance criteria; completed checks are recorded in `TESTING.md`.
 
 ## 1. Native foundation and a real live pipeline
 

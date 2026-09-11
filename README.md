@@ -6,7 +6,20 @@ Before the call, think deeply. During the call, make me glance, not read. After 
 
 ## Status
 
-Pre-build decisions recorded on September 11, 2026. The repository is initialized; application implementation and the build goal loop have not started.
+Implementation is underway. The native application builds and launches. Persistence tests and a real streaming/structured Codex App Server test pass. Live capture, meeting attribution, and end-to-end UI verification are still in progress.
+
+## Run locally
+
+Requires macOS 26, Apple Silicon, Swift tools, and `codex login` using ChatGPT.
+
+```sh
+scripts/build.sh
+# Launch build/Oblivion.app in Finder.
+scripts/test.sh
+OBLIVION_CODEX_TEST=1 scripts/test.sh
+```
+
+The last command exercises your real Codex account. Calls and attachments are stored under `~/Library/Application Support/Oblivion`; raw audio is not retained. Use `scripts/build.sh debug` for a quicker development build.
 
 ## Build priorities
 
