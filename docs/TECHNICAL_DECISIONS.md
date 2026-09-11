@@ -20,9 +20,23 @@ The [App Server documentation](https://learn.chatgpt.com/docs/app-server) provid
 
 All preparation, research, story work, notes generation, answer selection, coaching, and post-call analysis run through App Server. No direct paid Responses backend or third-party AI fallback is authorized.
 
+### Experimental App Server audio surface
+
+Generated JSON Schema from the installed `codex-cli 0.154.0` using `codex app-server generate-json-schema --experimental` exposes `thread/realtime/start`, `thread/realtime/appendAudio`, and transcript delta/done notifications. Start parameters include a text output modality. It would therefore be inaccurate to claim App Server categorically has no audio support. These interfaces are explicitly experimental; schema presence does not establish account access, backing model, costs, or accurate continuous meeting transcription. Native audio capture and durable call storage still belong to the app. Do not make this unverified audio route a dependency of the initial release.
+
+## Initial live pipeline: native capture, local transcription, Codex reasoning
+
+Live functionality is mandatory in the first usable release. The initial approach uses [ScreenCaptureKit's separate system and microphone capture](https://developer.apple.com/videos/play/wwdc2024/10088/) and [Apple SpeechAnalyzer/SpeechTranscriber](https://developer.apple.com/videos/play/wwdc2025/277/) for on-device continuous transcription. Transcript updates feed a persistent Codex context for coaching and answer selection. This does not require a separately billed transcription service.
+
+A read-only Swift runtime query on this Mac returned `SpeechTranscriber.isAvailable = true`, English (en-US) supported, and en-US assets installed. No audio was captured and no models were downloaded by that check. Actual capture, transcription quality, concurrency, and latency remain to be tested.
+
+Retain microphone versus meeting source identity, align their audio timelines, and distinguish provisional text from finalized transcript passages. Native source separation establishes the initial You/Meeting labels; Zoom Accessibility and the approved Meet extension add names when their signals are clear. Stream new context into an app-managed coaching loop using App Server's supported text turns, with bounded work, stale-result handling, and stable displayed answers during local speech. Ordinary App Server streaming is not itself an autonomous listener; the app owns scheduling and context updates.
+
+Use partial transcript text cautiously to retrieve prepared material early. Persist finalized text and corrections. Verify the complete capture-to-recommendation path early rather than relying on imported transcript fixtures as evidence of live functionality.
+
 ## GPT-Live-1: deferred candidate
 
-The user wants the core application built without this integration first. GPT-Live-1 remains the only authorized separately billed AI API candidate, but has not been selected as the final audio implementation. Keep all core reasoning and tools on Codex App Server.
+The user wants the core application built without this integration first, including real live transcription and advice through the initial native pipeline above. GPT-Live-1 remains the only authorized separately billed AI API candidate. Keep all core reasoning and tools on Codex App Server.
 
 [GPT-Live-1](https://developers.openai.com/api/docs/models/gpt-live-1) is a full-duplex voice model. Published session pricing is $0.05 per minute, billed per second, with backend usage separate. A single continuously open one-hour session is therefore $3 before any separately billed backend. Multiple sessions multiply session cost.
 
@@ -55,4 +69,4 @@ Granola documents [Zoom speaker tags](https://docs.granola.ai/help-center/taking
 - Detect dropped audio and disconnections rather than silently presenting an incomplete transcript as complete.
 - Never replace a displayed answer mid-delivery due only to a partial transcript revision.
 
-No speech accuracy percentage, latency target achievement, or reliable capture-exclusion claim has been established yet. Those require a real audio and presentation test on this Mac in the secondary phase.
+No speech accuracy percentage, latency target achievement, or reliable capture-exclusion claim has been established yet. Verify actual audio and response timing early in the build and presentation behavior when the HUD exists.

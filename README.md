@@ -10,8 +10,8 @@ Pre-build decisions recorded on September 11, 2026. The repository is initialize
 
 ## Build priorities
 
-1. Build the SwiftUI/AppKit application and real Codex App Server integration: persistent chats, free-form intake, preparation, attachments, research, prepared answers, notes, and transcript interaction. Validate the running app using computer use.
-2. Add the floating Call Mode HUD and Google Meet/Zoom audio capture with speaker attribution. Evaluate GPT-Live-1 as an audio candidate; the final live transcription choice is deferred and must not block the core application.
+1. Build the SwiftUI/AppKit application with real live listening, streaming transcription, and Codex App Server advice, alongside persistent chats, preparation, attachments, research, notes, and call records. Start with native macOS audio capture and Apple's on-device SpeechAnalyzer/SpeechTranscriber. Validate the running app using computer use. Live functionality is required for the first usable release.
+2. Complete the floating Call Mode HUD and Google Meet/Zoom speaker attribution. GPT-Live-1 remains an optional later evaluation; deferring that model does not defer live audio or coaching.
 
 Codex App Server is required for preparation, research, answer generation, coaching, and analysis. GPT-Live-1 is the only authorized separately billed AI API integration. Do not silently substitute a Responses API backend or a third-party transcription service.
 

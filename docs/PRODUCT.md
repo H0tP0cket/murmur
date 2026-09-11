@@ -12,6 +12,8 @@ The user's conversation and subsequent clarifications are authoritative. This do
 - Working name: Oblivion.
 - No accounts, cloud sync, calendar, project spaces, or dashboard required for the first release.
 
+The first usable release must include actual microphone/meeting capture, a live transcript, and advice based on the ongoing conversation. Deferring GPT-Live-1 does not defer these core features. Initial architecture: native audio capture, Apple on-device speech transcription, and Codex App Server for all generative reasoning and tools.
+
 ## Main application
 
 The sidebar contains New call and past chats. One chat is the persistent home of one call, including preparation and the conversation afterward.
@@ -62,7 +64,7 @@ After End call, the same chat can summarize findings, unresolved questions, sign
 
 ## Storage and presentation assumptions
 
-Default to storing chats, attachments, notes, prepared material, and transcripts locally. Local storage does not mean local inference: relevant context is sent through Codex App Server. The live audio implementation is deferred; selecting GPT-Live-1 later would send captured audio to that service. Default to no retained raw audio recording; revisit only if requested. Do not claim a provider's server-side retention policy is controlled by our local storage choice.
+Default to storing chats, attachments, notes, prepared material, and transcripts locally. Initial audio transcription runs on device using Apple's speech APIs; relevant transcript and preparation text is sent through Codex App Server for reasoning. Selecting GPT-Live-1 later would send captured audio to that service. Default to streaming audio capture without a retained raw recording; revisit recording retention only if requested. Do not claim a provider's server-side retention policy is controlled by our local storage choice.
 
 Explain presentation safety during intake/onboarding. Keep the HUD in its own native window and support sharing a selected application/window or using an unshared display. Do not promise universal invisibility under full-display capture or infer a verified safe state from incomplete meeting-app signals.
 
