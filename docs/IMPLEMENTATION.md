@@ -34,7 +34,7 @@ Acceptance: replay a scripted conversation and verify introduction, short follow
 
 - Integrate separate microphone and meeting audio capture on this Mac.
 - Add GPT-Live-1 transcript ingestion with locally durable original fragments and user corrections.
-- Add Zoom Accessibility attribution and, if accepted, a Meet companion extension.
+- Add Zoom Accessibility attribution and the approved Meet companion Chrome extension for participant names and speaking activity.
 - Route reasoning and coaching through App Server and account for Live API session costs.
 - Verify real Google Meet/Zoom behavior with headphones and device changes.
 

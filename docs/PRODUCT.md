@@ -6,6 +6,7 @@ The user's conversation and subsequent clarifications are authoritative. This do
 
 - One user, on their own Apple Silicon Mac.
 - Google Meet and Zoom, usually with headphones.
+- Include a companion Chrome extension for Google Meet participant names and speaking activity in the live audio phase; approved September 11, 2026.
 - A calm native Mac application using ChatGPT/Codex interaction patterns and Apple's design guidance.
 - Working name: Oblivion.
 - No accounts, cloud sync, calendar, project spaces, or dashboard required for the first release.
@@ -75,7 +76,6 @@ These are recommendations, not reasons to expand the main navigation:
 - Tracking unanswered questions, promises, and topics already covered during a call.
 - Prepared material that stays readable if inference disconnects or hits a usage limit.
 
-## Open preferences
+## Remaining defaults
 
-- Optional companion Chrome extension for Google Meet speaker names: asked September 11, 2026; awaiting answer.
 - English-first behavior and no retained audio are proposed defaults, not prerequisites for building the main app.
