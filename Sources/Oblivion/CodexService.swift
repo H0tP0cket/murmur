@@ -51,7 +51,9 @@ final class CodexService: ObservableObject {
             Task { @MainActor in self?.receive(data) }
         }
         stderr.fileHandleForReading.readabilityHandler = { handle in if handle.availableData.isEmpty { handle.readabilityHandler = nil } }
-        proc.terminationHandler = { [weak self] _ in Task { @MainActor in self?.disconnected() } }
+        proc.terminationHandler = { [weak self] ended in Task { @MainActor in
+            guard let self, self.process === ended else { return }; self.disconnected()
+        } }
         process = proc; input = stdin.fileHandleForWriting; buffer = Data()
         try proc.run()
         _ = try await request("initialize", ["clientInfo": ["name": "oblivion", "title": "Oblivion", "version": "0.1.0"], "capabilities": ["experimentalApi": true]])
@@ -80,13 +82,13 @@ final class CodexService: ObservableObject {
         return preferences.first(where: { name in models.contains { $0.id == name } }) ?? models.first?.id
     }
 
-    func thread(cwd: URL, existing: String? = nil, live: Bool = false) async throws -> String {
+    func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false) async throws -> String {
         try await connect()
         if let existing {
             _ = try await request("thread/resume", ["threadId": existing, "cwd": cwd.path])
             return existing
         }
-        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": live ? Prompts.coach : Prompts.assistant, "ephemeral": live, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
+        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": live ? Prompts.coach : Prompts.assistant, "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
         if let model = model(live: live) { params["model"] = model }
         let result = try await request("thread/start", params)
         guard let id = (result["thread"] as? [String: Any])?["id"] as? String else { throw OblivionError.message("Codex didn’t return a conversation.") }
@@ -128,7 +130,10 @@ final class CodexService: ObservableObject {
     func cancel(threadID: String) async {
         guard let waiter = turns[threadID] else { return }
         waiter.cancelled = true
-        if let turnID = waiter.turnID { _ = try? await request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) }
+        if let turnID = waiter.turnID {
+            _ = try? await request("turn/interrupt", ["threadId": threadID, "turnId": turnID])
+            if turns[threadID] === waiter { finish(threadID, .failure(CancellationError())) }
+        }
     }
 
     func disconnect() {

@@ -98,13 +98,13 @@ struct HUDView: View {
                 Button { state.windows.toggleHUD() } label: { Image(systemName: "eye.slash") }.help("Hide · ⌘⇧Space")
             }.buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 23).padding(.top, 20).padding(.bottom, 13)
             Divider().opacity(0.5)
-            HStack { Text(state.recommendation.kind).font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary); Spacer(); if state.audio.localSpeaking { Text("Holding your answer").font(.system(size: 10)).foregroundStyle(.tertiary) } }.padding(.horizontal, 24).padding(.top, 19)
+            HStack { Text(state.recommendation.kind).font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary); Spacer(); if state.audio.localSpeaking || state.recommendationPinned { Text(state.recommendationPinned ? "Pinned" : "Holding your answer").font(.system(size: 10)).foregroundStyle(.tertiary) } }.padding(.horizontal, 24).padding(.top, 19)
             ScrollView { Text(state.recommendation.answer).font(.system(size: 20, weight: .medium)).lineSpacing(7).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 9).padding(.bottom, 14) }.frame(maxHeight: .infinity)
             if !state.coachingStatus.isEmpty && !state.coachingBusy { Text(state.coachingStatus).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(3).padding(.horizontal, 24).padding(.bottom, 8) }
             if state.showDirectQuestion {
                 Divider().opacity(0.5)
                 VStack(alignment: .leading, spacing: 9) {
-                    HStack { TextField("Ask about this call…", text: $state.directQuestion).textFieldStyle(.plain).focused($inputFocused).onSubmit { state.askDirect() }; Button { state.askDirect() } label: { Image(systemName: "arrow.up.circle.fill") }.disabled(state.coachingBusy); Button { state.showDirectQuestion = false } label: { Image(systemName: "xmark") } }.buttonStyle(.plain).font(.system(size: 13))
+                    HStack { TextField("Ask about this call…", text: $state.directQuestion).textFieldStyle(.plain).focused($inputFocused).onSubmit { state.askDirect() }; Button { state.askDirect() } label: { Image(systemName: "arrow.up.circle.fill") }; Button { state.showDirectQuestion = false } label: { Image(systemName: "xmark") } }.buttonStyle(.plain).font(.system(size: 13))
                     if state.coachingBusy { ProgressView().controlSize(.small) }
                     if !state.directAnswer.isEmpty { ScrollView { Text(state.directAnswer).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 120) }
                 }.padding(.horizontal, 24).padding(.vertical, 13)
@@ -113,7 +113,12 @@ struct HUDView: View {
             HStack(spacing: 17) {
                 Button { state.windows.returnToChat() } label: { Label("Chat", systemImage: "arrow.down.left") }.help("Return to chat · ⌘⇧X")
                 Button { state.windows.ask() } label: { Label("Ask", systemImage: "sparkle") }.help("Ask copilot · ⌘K")
-                Button { state.requestCoaching(force: true) } label: { Image(systemName: "arrow.clockwise") }.disabled(state.coachingBusy).help("Get another recommendation")
+                Button { state.recommendationPinned = false; state.requestCoaching(force: true) } label: { Image(systemName: "arrow.clockwise") }.disabled(state.coachingBusy).help("Get another recommendation")
+                Menu {
+                    Button(state.recommendationPinned ? "Unpin answer" : "Pin this answer") { state.recommendationPinned.toggle() }
+                    Divider()
+                    ForEach(state.activeCall?.stories.filter(\.approved) ?? []) { story in Button(story.title) { state.useStory(story) } }
+                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "rectangle.stack") }.menuStyle(.borderlessButton).fixedSize().help("Prepared answers · available offline")
                 Spacer()
                 AudioLevelsView(audio: state.audio)
                 Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)

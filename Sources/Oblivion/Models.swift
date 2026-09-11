@@ -60,12 +60,14 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var stories: [PreparedStory] = []
     var notes = ""
     var generatedNotes = ""
+    var generatedNotesEdited: Bool?
+    var suggestedNotes: String?
     var transcript: [TranscriptSegment] = []
     var sessions: [CallSession] = []
     var intro = ""
 
     var transcriptText: String {
-        transcript.map { "[\($0.timestamp)] \($0.speaker): \($0.text)" }.joined(separator: "\n")
+        transcript.map { "[\($0.timestamp)] \($0.speaker)\($0.isFinal ? "" : " [partial]"): \($0.text)" }.joined(separator: "\n")
     }
     var preparationText: String {
         let chat = messages.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n")

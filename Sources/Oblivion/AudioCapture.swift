@@ -20,6 +20,8 @@ final class SpeechPipeline {
     private var format: AVAudioFormat?
     private var converter: AVAudioConverter?
     private var sourceFormat: AVAudioFormat?
+    private var nextInputTime: CMTime?
+    private(set) var processedDuration = 0.0
     let source: String
     var onResult: (SpeechUpdate) -> Void
     var onError: (String) -> Void
@@ -59,6 +61,7 @@ final class SpeechPipeline {
             if sourceFormat != buffer.format {
                 sourceFormat = buffer.format
                 converter = AVAudioConverter(from: buffer.format, to: format)
+                converter?.primeMethod = .none
             }
             guard let converter,
                   let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(ceil(Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate)) + 256) else { return }
@@ -74,7 +77,16 @@ final class SpeechPipeline {
             }
             converted = output
         }
-        if case .dropped = continuation.yield(AnalyzerInput(buffer: converted, bufferStartTime: time)) {
+        processedDuration += Double(converted.frameLength) / format.sampleRate
+        // Resampling may round a buffer by one sample. SpeechAnalyzer rejects
+        // even a fractional overlap, so use a monotonic clock in its sample rate.
+        let scale = Int32(format.sampleRate)
+        let requested = CMTimeConvertScale(time, timescale: scale, method: .roundHalfAwayFromZero)
+        // Tiny timestamp gaps cause SpeechAnalyzer to finalize mid-word. Snap
+        // ordinary resampling/capture jitter to continuity; preserve real gaps.
+        let actual = nextInputTime.map { CMTimeSubtract(requested, $0).seconds > 0.08 ? requested : $0 } ?? requested
+        nextInputTime = CMTimeAdd(actual, CMTime(value: Int64(converted.frameLength), timescale: scale))
+        if case .dropped = continuation.yield(AnalyzerInput(buffer: converted, bufferStartTime: actual)) {
             onError("Transcription fell behind. A short section of audio was dropped.")
         }
     }
@@ -83,7 +95,7 @@ final class SpeechPipeline {
         continuation?.finish(); continuation = nil
         if let analyzer { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
         if let resultsTask { await resultsTask.value }
-        self.resultsTask = nil; analyzer = nil; converter = nil; sourceFormat = nil
+        self.resultsTask = nil; analyzer = nil; converter = nil; sourceFormat = nil; nextInputTime = nil
     }
 }
 
@@ -99,6 +111,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
     var onIssue: (String) -> Void = { _ in }
     var onSpeakingChanged: (Bool) -> Void = { _ in }
     private var stream: SCStream?
+    private var startID: UUID?
     private var microphone: SpeechPipeline?
     private var meeting: SpeechPipeline?
     private var hostStart = CMTime.zero
@@ -110,24 +123,32 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
 
     func start(applicationID: String?) async throws {
         guard !isRunning else { return }
-        status = "Preparing local transcription…"
+        let generation = UUID(); startID = generation
+        status = "Allow microphone access if prompted…"
         guard await AVCaptureDevice.requestAccess(for: .audio) else { throw OblivionError.message("Allow microphone access in System Settings → Privacy & Security → Microphone, then try again.") }
+        try ensureCurrent(generation)
+        status = "Allow Screen & System Audio Recording if prompted…"
         let content: SCShareableContent
         do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) }
         catch { throw OblivionError.message("Allow Screen & System Audio Recording for Oblivion in System Settings, then try again. \(error.localizedDescription)") }
+        try ensureCurrent(generation)
         guard let display = content.displays.first else { throw OblivionError.message("No display is available for meeting audio capture.") }
         applications = content.applications.filter { !$0.applicationName.isEmpty && $0.bundleIdentifier != Bundle.main.bundleIdentifier }.map { ($0.bundleIdentifier, $0.applicationName) }.sorted { $0.name < $1.name }
         let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
         let filter: SCContentFilter
-        if let applicationID, !applicationID.isEmpty, let app = content.applications.first(where: { $0.bundleIdentifier == applicationID }) {
+        if let applicationID, !applicationID.isEmpty {
+            guard let app = content.applications.first(where: { $0.bundleIdentifier == applicationID }) else { throw OblivionError.message("The selected meeting app is not running. Open it, or choose another audio source.") }
             filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
         } else { filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: []) }
         let microphone = SpeechPipeline(source: "microphone", onResult: { [weak self] in self?.onResult($0) }, onError: { [weak self] in self?.issue($0) })
         let meeting = SpeechPipeline(source: "meeting", onResult: { [weak self] in self?.onResult($0) }, onError: { [weak self] in self?.issue($0) })
         self.microphone = microphone; self.meeting = meeting
         do {
+            status = "Preparing on-device transcription…"
             try await microphone.start()
+            try ensureCurrent(generation)
             try await meeting.start()
+            try ensureCurrent(generation)
             let configuration = SCStreamConfiguration()
             configuration.width = 2; configuration.height = 2
             configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
@@ -141,6 +162,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
             self.stream = stream
             hostStart = CMClockGetTime(CMClockGetHostTimeClock())
             try await stream.startCapture()
+            try ensureCurrent(generation)
             isRunning = true; status = "Listening on this Mac"
             levelTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                 Task { @MainActor in
@@ -152,11 +174,16 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
                 }
             }
         } catch {
-            await stop(); throw error
+            if startID == generation { await stop() }; throw error
         }
     }
 
+    private func ensureCurrent(_ generation: UUID) throws {
+        guard startID == generation, !Task.isCancelled else { throw CancellationError() }
+    }
+
     func stop() async {
+        startID = nil
         status = "Finishing transcript…"
         levelTimer?.invalidate(); levelTimer = nil
         if let stream { try? await stream.stopCapture() }

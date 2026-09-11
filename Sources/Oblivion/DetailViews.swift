@@ -28,9 +28,19 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("YOUR NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
                 TextEditor(text: Binding(get: { state.selected?.notes ?? "" }, set: { value in state.modify(call.id) { $0.notes = value } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 190).padding(6).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-                HStack { Text("CALL NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary); Spacer(); Button { state.updateNotes() } label: { Label("Update", systemImage: "sparkles") }.font(.system(size: 11)).disabled(state.isBusy) }
+                HStack { Text("CALL NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary); Spacer(); Button { state.updateNotes(callID: call.id) } label: { Label("Update", systemImage: "sparkles") }.font(.system(size: 11)).disabled(state.notesBusy.contains(call.id)) }
                 if call.generatedNotes.isEmpty { Text("Findings, open questions, and follow-ups will live here. Your own notes above stay yours.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4) }
-                else { TextEditor(text: Binding(get: { state.selected?.generatedNotes ?? "" }, set: { value in state.modify(call.id) { $0.generatedNotes = value } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320) }
+                else { TextEditor(text: Binding(get: { state.selected?.generatedNotes ?? "" }, set: { value in state.modify(call.id) { $0.generatedNotes = value; $0.generatedNotesEdited = true } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320) }
+                if let suggestion = call.suggestedNotes {
+                    DisclosureGroup("Updated notes ready") {
+                        Text(suggestion).font(.system(size: 12)).textSelection(.enabled).padding(.vertical, 8)
+                        HStack {
+                            Button("Replace call notes") { state.modify(call.id) { $0.generatedNotes = suggestion; $0.suggestedNotes = nil; $0.generatedNotesEdited = false } }
+                            Button("Dismiss") { state.modify(call.id) { $0.suggestedNotes = nil } }
+                        }.font(.system(size: 11))
+                    }
+                    Text("Your edits are preserved until you accept an update.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Button("Ask about these notes") { state.composer = "What are the most important takeaways from my notes?" }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(.horizontal, 20).padding(.bottom, 24)
         }
@@ -46,7 +56,7 @@ struct DetailView: View {
                         HStack { Text(story.title).font(.system(size: 13, weight: .semibold)); Spacer(); Image(systemName: story.approved ? "checkmark.seal" : "pencil").foregroundStyle(.secondary) }
                         if !story.cues.isEmpty { Text(story.cues).font(.system(size: 11)).foregroundStyle(.secondary) }
                         Text(story.body).font(.system(size: 12)).lineLimit(4).foregroundStyle(.secondary)
-                        HStack { Button("Edit") { state.editingStory = story }; Spacer(); Button("Use now") { state.recommendation = Recommendation(kind: "ANSWER", coaching: "Your prepared answer.", answer: story.body, storyID: story.id.uuidString) }.disabled(state.activeCallID != call.id) }.buttonStyle(.plain).font(.system(size: 11))
+                        HStack { Button("Edit") { state.editingStory = story }; Spacer(); Button("Use now") { state.useStory(story) }.disabled(state.activeCallID != call.id) }.buttonStyle(.plain).font(.system(size: 11))
                     }.padding(13).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
                 }
             }.padding(.horizontal, 20).padding(.bottom, 24)
@@ -163,6 +173,15 @@ struct SettingsView: View {
                     TextField("Executable path (optional)", text: $codexPath)
                     Button("Reconnect") { state.codex.disconnect(); Task { await state.reconnect() } }
                 }
+                Section("Speaker names") {
+                    AttributionStatusView(attribution: state.attribution)
+                    Button("Set up Meet companion…") {
+                        do { let folder = try state.attribution.installMeetCompanion(root: state.library.root); NSWorkspace.shared.open(folder) }
+                        catch { state.error = error.localizedDescription }
+                    }
+                    Text("In chrome://extensions, enable Developer mode, choose Load unpacked, and select the Meet folder. In a meeting, open the extension and choose Use this meeting.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Button("Allow Zoom Accessibility") { state.attribution.requestAccessibility() }
+                }
                 Section("Call shortcuts") {
                     LabeledContent("Hide / show", value: "⌘⇧Space")
                     LabeledContent("Return to chat", value: "⌘⇧X")
@@ -178,4 +197,9 @@ struct SettingsView: View {
 struct CodexStatusView: View {
     @ObservedObject var service: CodexService
     var body: some View { Label(service.status, systemImage: service.isConnected ? "checkmark.circle" : "circle.dotted").font(.system(size: 12)).foregroundStyle(service.isConnected ? Color.green : Color.secondary) }
+}
+
+struct AttributionStatusView: View {
+    @ObservedObject var attribution: MeetingAttribution
+    var body: some View { Text(attribution.status).font(.system(size: 12)).foregroundStyle(.secondary) }
 }

@@ -5,7 +5,10 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppState: ObservableObject {
     @Published var calls: [CallRecord] = []
-    @Published var selectedID: UUID?
+    @Published var selectedID: UUID? {
+        willSet { if let selectedID { drafts[selectedID] = composer } }
+        didSet { composer = selectedID.flatMap { drafts[$0] } ?? "" }
+    }
     @Published var composer = ""
     @Published var busyCalls: Set<UUID> = []
     @Published var chatStatus = ""
@@ -18,6 +21,8 @@ final class AppState: ObservableObject {
     @Published var callEnding = false
     @Published var recommendation = Recommendation.waiting
     @Published var coachingBusy = false
+    @Published var notesBusy: Set<UUID> = []
+    @Published var recommendationPinned = false
     @Published var coachingStatus = ""
     @Published var hudVisible = false
     @Published var showCallSetup = false
@@ -29,9 +34,14 @@ final class AppState: ObservableObject {
     @Published var audioSource = UserDefaults.standard.string(forKey: "audioSource") ?? ""
     let codex = CodexService()
     let audio = AudioCapture()
+    let attribution = MeetingAttribution()
     let library: LibraryStore
     lazy var windows = WindowCoordinator(state: self)
-    var speakerName: String? // Updated only by a current, matching meeting adapter.
+    private var drafts: [UUID: String] = [:]
+    private var pendingSummaries: Set<UUID> = []
+    private var pendingDirectQuestion: String?
+    private var lastNotes = Date.distantPast
+    private var notesRevision = 0
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var coachTask: Task<Void, Never>?
     private var coachThread: String?
@@ -63,7 +73,8 @@ final class AppState: ObservableObject {
         audio.onIssue = { [weak self] in self?.captureIssue($0) }
         audio.onSpeakingChanged = { [weak self] speaking in
             guard let self else { return }
-            if !speaking, let pending = pendingRecommendation {
+            objectWillChange.send()
+            if !speaking, !recommendationPinned, let pending = pendingRecommendation {
                 recommendation = pending; pendingRecommendation = nil
             }
         }
@@ -121,7 +132,10 @@ final class AppState: ObservableObject {
         busyCalls.insert(id); chatStatus = "Thinking…"
         tasks[id] = Task { [weak self] in
             guard let self else { return }
-            defer { busyCalls.remove(id); tasks[id] = nil; chatStatus = ""; persist(id) }
+            defer {
+                busyCalls.remove(id); tasks[id] = nil; chatStatus = ""; persist(id)
+                if pendingSummaries.remove(id) != nil { postSummary(id) }
+            }
             do {
                 guard let call = calls.first(where: { $0.id == id }) else { return }
                 let threadID = try await codex.thread(cwd: library.directory(id), existing: call.threadID)
@@ -194,18 +208,34 @@ final class AppState: ObservableObject {
         editingStory = nil; detail = .stories
     }
 
-    func updateNotes() {
-        guard let call = selected, !busyCalls.contains(call.id) else { return }
-        let id = call.id
-        busyCalls.insert(id)
+    func updateNotes(callID: UUID? = nil) {
+        guard let id = callID ?? selectedID, let call = calls.first(where: { $0.id == id }), !notesBusy.contains(id) else { return }
+        notesBusy.insert(id); lastNotes = Date(); notesRevision = transcriptRevision
+        let baseline = call.generatedNotes
         Task {
-            defer { busyCalls.remove(id) }
+            defer { notesBusy.remove(id) }
             do {
-                let thread = try await codex.thread(cwd: library.directory(id), live: false)
-                let result = try await codex.run(threadID: thread, text: "Organize concise meeting notes under Key findings, Pain points, People / systems, and Follow-ups. Ground every item in the supplied material. Keep unresolved questions distinct from facts. Do not use tools.\n\n\(call.preparationText)\n\nTRANSCRIPT:\n\(call.transcriptText)")
-                modify(id) { $0.generatedNotes = result }
+                let thread = try await codex.thread(cwd: library.directory(id), ephemeral: true)
+                let result = try await codex.run(threadID: thread, text: "Organize concise meeting notes under Key findings, Pain points, People / systems, and Follow-ups. Ground every item in the supplied material. Keep unresolved questions distinct from facts. Preserve the user's existing corrections and do not repeat items. Do not use tools.\n\nEXISTING NOTES:\n\(baseline)\n\n\(call.preparationText)\n\nTRANSCRIPT:\n\(call.transcriptText)", live: true)
+                modify(id) { record in
+                    if record.generatedNotesEdited == true || record.generatedNotes != baseline { record.suggestedNotes = result }
+                    else { record.generatedNotes = result }
+                }
             } catch { self.error = error.localizedDescription }
         }
+    }
+
+    private func postSummary(_ id: UUID) {
+        if busyCalls.contains(id) { pendingSummaries.insert(id); return }
+        let current = selectedID
+        selectedID = id
+        send("Call ended. Summarize what we learned, strongest signals, unresolved questions, promises I made, the best next step, and a suggested follow-up message. Use only the captured conversation and preparation.", system: true)
+        selectedID = current
+    }
+
+    func useStory(_ story: PreparedStory) {
+        pendingRecommendation = nil; recommendationPinned = true
+        recommendation = Recommendation(kind: "ANSWER", coaching: "Your prepared answer. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
     }
 
     func startCall(popOut: Bool = true) async {
@@ -215,18 +245,23 @@ final class AppState: ObservableObject {
         let session = CallSession(); activeSession = session.id
         modify(id) { $0.sessions.append(session) }
         recommendation = Recommendation(kind: "INTRO", coaching: "Getting ready to listen.", answer: selected?.intro.isEmpty == false ? selected!.intro : "Preparing your opening from this conversation…")
-        transcriptRevision = 0; coachedRevision = -1; coachThread = nil; pendingRecommendation = nil; directAnswer = ""
+        transcriptRevision = 0; coachedRevision = -1; notesRevision = 0; lastNotes = Date(); recommendationPinned = false; coachThread = nil; pendingRecommendation = nil; directAnswer = ""
         UserDefaults.standard.set(audioSource, forKey: "audioSource")
         do {
             try await audio.start(applicationID: audioSource.isEmpty ? nil : audioSource)
+            guard activeSession == session.id else { return }
             callStarting = false
+            modify(id) { record in if let index = record.sessions.firstIndex(where: { $0.id == session.id }) { record.sessions[index].startedAt = Date() } }
+            attribution.start(root: library.root, session: session.id, source: audioSource)
             if popOut { windows.showHUD() }
             requestCoaching(force: true)
-            coachTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestCoaching() } }
+            coachTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestCoaching()
+                if let self, let id = self.activeCallID, Date().timeIntervalSince(self.lastNotes) > 60, self.transcriptRevision - self.notesRevision > 8 { self.updateNotes(callID: id) }
+            } }
             windows.installShortcuts()
         } catch {
-            self.error = error.localizedDescription
-            captureIssue(error.localizedDescription)
+            guard activeSession == session.id else { return }
+            if !(error is CancellationError) { self.error = error.localizedDescription; captureIssue(error.localizedDescription) }
             await audio.stop()
             modify(id) { record in if let index = record.sessions.firstIndex(where: { $0.id == session.id }) { record.sessions[index].endedAt = Date() } }
             activeCallID = nil; activeSession = nil; callStarting = false
@@ -238,24 +273,19 @@ final class AppState: ObservableObject {
         callEnding = true; coachTimer?.invalidate(); coachTimer = nil; coachTask?.cancel()
         if let coachThread { await codex.cancel(threadID: coachThread) }
         await audio.stop()
+        attribution.stop()
         modify(id) { record in if let index = record.sessions.firstIndex(where: { $0.id == activeSession }) { record.sessions[index].endedAt = Date() } }
-        activeCallID = nil; activeSession = nil; coachThread = nil; pendingRecommendation = nil
-        coachingBusy = false; callEnding = false; selectedID = id
+        activeCallID = nil; activeSession = nil; coachThread = nil; pendingRecommendation = nil; pendingDirectQuestion = nil
+        coachingBusy = false; callEnding = false; callStarting = false; selectedID = id
         windows.removeShortcuts(); windows.returnToChat()
-        if summarize { send("Call ended. Summarize what we learned, strongest signals, unresolved questions, promises I made, the best next step, and a suggested follow-up message. Use only the captured conversation and preparation.", system: true) }
+        if summarize, calls.first(where: { $0.id == id })?.transcript.isEmpty == false { postSummary(id); updateNotes(callID: id) }
     }
 
     func receiveSpeech(_ update: SpeechUpdate) {
         guard let id = activeCallID, let session = activeSession, !update.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let speaker = update.source == "microphone" ? "You" : (speakerName ?? "Meeting")
+        let speaker = update.source == "microphone" ? "You" : (attribution.speaker(start: update.start, end: update.end) ?? "Meeting")
         modify(id, { call in
-            if let index = call.transcript.firstIndex(where: { $0.sessionID == session && $0.source == update.source && !$0.isFinal && abs($0.start - update.start) < 0.15 }) {
-                call.transcript[index].original = update.text; call.transcript[index].end = update.end; call.transcript[index].isFinal = update.isFinal
-            } else if !call.transcript.contains(where: { $0.sessionID == session && $0.source == update.source && abs($0.start - update.start) < 0.1 && $0.original == update.text && $0.isFinal }) {
-                call.transcript.append(TranscriptSegment(sessionID: session, source: update.source, speaker: speaker, start: max(0, update.start), end: max(0, update.end), original: update.text, isFinal: update.isFinal))
-                let order = Dictionary(uniqueKeysWithValues: call.sessions.enumerated().map { ($0.element.id, $0.offset) })
-                call.transcript.sort { lhs, rhs in lhs.sessionID == rhs.sessionID ? lhs.start < rhs.start : (order[lhs.sessionID] ?? 0) < (order[rhs.sessionID] ?? 0) }
-            }
+            TranscriptIngestor.apply(update, speaker: speaker, session: session, to: &call)
         }, save: update.isFinal || Date().timeIntervalSince(lastSave) > 2)
         transcriptRevision += 1
     }
@@ -274,7 +304,13 @@ final class AppState: ObservableObject {
         coachingStatus = question == nil ? "Listening and thinking…" : "Looking that up…"
         coachTask = Task { [weak self] in
             guard let self else { return }
-            defer { coachingBusy = false }
+            defer {
+                coachingBusy = false
+                if let question = pendingDirectQuestion, activeCallID == callID, !callEnding {
+                    pendingDirectQuestion = nil
+                    Task { @MainActor in self.requestCoaching(force: true, question: question) }
+                }
+            }
             do {
                 let thread: String
                 if let coachThread { thread = coachThread } else { thread = try await codex.thread(cwd: library.directory(callID), live: true); coachThread = thread }
@@ -287,7 +323,7 @@ final class AppState: ObservableObject {
                 if question != nil { directAnswer = next.answer }
                 else {
                     recommendation.coaching = next.coaching
-                    if audio.localSpeaking { pendingRecommendation = next } else { recommendation = next }
+                    if audio.localSpeaking || recommendationPinned { pendingRecommendation = next } else { recommendation = next }
                     if next.kind == "INTRO" { modify(callID) { $0.intro = next.answer } }
                 }
                 coachedRevision = revision; coachingStatus = ""
@@ -298,7 +334,9 @@ final class AppState: ObservableObject {
 
     func askDirect() {
         let question = directQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !coachingBusy else { return }
-        directQuestion = ""; requestCoaching(force: true, question: question)
+        guard !question.isEmpty else { return }
+        directQuestion = ""; directAnswer = ""
+        if coachingBusy { pendingDirectQuestion = question; coachTask?.cancel() }
+        else { requestCoaching(force: true, question: question) }
     }
 }
