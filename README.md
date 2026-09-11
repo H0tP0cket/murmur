@@ -15,11 +15,27 @@ Requires macOS 26, Apple Silicon, Swift tools, and `codex login` using ChatGPT.
 ```sh
 scripts/build.sh
 # Launch build/Oblivion.app in Finder.
+scripts/install.sh # Quit Oblivion first; installs to ~/Applications.
 scripts/test.sh
 OBLIVION_CODEX_TEST=1 scripts/test.sh
 ```
 
 The last command exercises your real Codex account. Calls and attachments are stored under `~/Library/Application Support/Oblivion`; raw audio is not retained. Use `scripts/build.sh debug` for a quicker development build.
+
+## Using the app
+
+Create a call and work through your preparation in the chat. Use the attachment button for PDFs/text and paste links for research. Save complete stories with **Save answer**. Your shared personal background lives in Settings.
+
+**Start call** captures microphone and meeting audio. The upper HUD gives one recommendation and a small coaching strip. **Chat** returns to the main window while listening continues; **End call** stops capture and saves the transcript. The sidebar document button opens transcript search/corrections/export. Notes and prepared answers open from the chat header.
+
+- `⌘⇧Space`: hide/show the HUD during a call.
+- `⌘⇧X`: return to the chat.
+- `⌘⌥K`: ask the copilot globally; `⌘K` works inside the HUD.
+- `⌘⇧P`: pop out from the app.
+
+Share a specific tab/application window or use a separate display for the HUD. Full-display sharing may expose it. A local Chrome tab-capture receiver test passed; this is not a universal capture-exclusion guarantee.
+
+For Meet names, Settings → **Set up Meet companion…** installs the native host and opens the extension folder. Manually load that folder in Chrome's extensions page, open the extension in your meeting, and select **Use this meeting**. The call still works without names; uncertain speakers remain “Meeting.”
 
 ## Build priorities
 

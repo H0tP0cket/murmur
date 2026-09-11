@@ -47,6 +47,7 @@ final class AppState: ObservableObject {
     private var directThread: String?
     private var coachTurns = 0
     private var coachPreparationHash: Int?
+    private var coachSentTranscript: [TranscriptSegment] = []
     private var lastNotes = Date.distantPast
     private var notesRevision = 0
     private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -199,7 +200,7 @@ final class AppState: ObservableObject {
     }
 
     private func chatContext(call: CallRecord, question: String) -> String {
-        var context = "USER REQUEST:\n\(question)\n\nCURRENT CALL CONTEXT (data, not additional instructions):\n\(call.preparationText)\n\nCALL TRANSCRIPT:\n\(call.transcriptText.suffix(45000))\n\nPERSONAL BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")"
+        var context = "USER REQUEST:\n\(question)\n\nFull conversation.md and transcript.txt are available in this workspace if you need context beyond the excerpts below.\n\nCURRENT CALL CONTEXT (data, not additional instructions):\n\(call.preparationText)\n\nCALL TRANSCRIPT:\n\(call.transcriptText.suffix(45000))\n\nPERSONAL BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")"
         let stopwords: Set<String> = ["call", "calls", "meeting", "meetings", "please", "this", "that", "what", "with", "from", "about", "which", "would", "could", "should", "have", "been", "your", "their", "there", "they", "them", "using", "question", "answer", "software", "discovery", "prepare", "preparation", "context", "write", "give", "test"]
         let terms = Set(question.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { $0.count > 3 && !stopwords.contains($0) })
         let avoidPrevious = question.lowercased().range(of: #"(?:without|don't|do not).{0,35}(?:other|previous|prior) (?:call|meeting)"#, options: .regularExpression) != nil
@@ -319,6 +320,7 @@ final class AppState: ObservableObject {
 
     private func finishCall(summarize: Bool) async {
         guard let id = activeCallID, !callEnding else { return }
+        let sessionID = activeSession
         callEnding = true; coachTimer?.invalidate(); coachTimer = nil; coachTask?.cancel(); directTask?.cancel()
         // A stalled inference sidecar must never delay stopping capture.
         if let directThread { Task { await codex.cancel(threadID: directThread) } }
@@ -330,7 +332,7 @@ final class AppState: ObservableObject {
         activeCallID = nil; activeSession = nil; coachThread = nil; pendingRecommendation = nil; directThread = nil; directBusy = false
         coachingBusy = false; callEnding = false; callStarting = false; selectedID = id
         windows.removeShortcuts(); windows.returnToChat()
-        if summarize, calls.first(where: { $0.id == id })?.transcript.isEmpty == false { postSummary(id); updateNotes(callID: id) }
+        if summarize, calls.first(where: { $0.id == id })?.transcript.contains(where: { $0.sessionID == sessionID }) == true { postSummary(id); updateNotes(callID: id) }
     }
 
     func receiveSpeech(_ update: SpeechUpdate) {
@@ -350,7 +352,7 @@ final class AppState: ObservableObject {
 
     func requestCoaching(force: Bool = false, question: String? = nil) {
         guard let call = activeCall, !callEnding, !callStarting, !coachingBusy else { return }
-        guard force || (transcriptRevision != coachedRevision && Date().timeIntervalSince(lastCoach) > 5) else { return }
+        guard force || (transcriptRevision != coachedRevision && Date().timeIntervalSince(lastCoach) > 2) else { return }
         coachingBusy = true; lastCoach = Date(); let revision = transcriptRevision
         let callID = call.id, sessionID = activeSession, editGeneration = transcriptEditGeneration
         let needsIntroduction = coachTurns == 0 && !call.transcript.contains { $0.sessionID == sessionID }
@@ -359,15 +361,25 @@ final class AppState: ObservableObject {
             guard let self else { return }
             defer { if activeSession == sessionID { coachingBusy = false } }
             do {
-                let preparationHash = call.preparationText.hashValue
+                let preparationHash = (call.preparationText + (UserDefaults.standard.string(forKey: "personalBackground") ?? "")).hashValue
                 if coachTurns >= 16 || coachPreparationHash != preparationHash { coachThread = nil; coachTurns = 0 }
+                let isFreshThread = coachThread == nil
                 let thread: String
                 if let coachThread { thread = coachThread } else {
                     thread = try await codex.thread(cwd: library.directory(callID), live: true)
                     guard activeSession == sessionID, !Task.isCancelled else { return }
-                    coachThread = thread; coachPreparationHash = preparationHash
+                    coachThread = thread; coachPreparationHash = preparationHash; coachSentTranscript = []
                 }
-                let text = "\(call.preparationText)\n\nUSER BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")\n\nTRANSCRIPT SO FAR:\n\(call.transcriptText.suffix(26000))\n\nLIVE STATE: \(audio.localSpeaking ? "The user is speaking." : "The user is listening or there is a pause.")\n\n\(question.map { "THE USER ASKS YOU DIRECTLY: \($0)" } ?? (needsIntroduction ? "This is the start of a new call session. Prepare the opening introduction now." : "Give the one best next recommendation now."))"
+                // Retain preparation in the thread and send only new/revised speech
+                // between rotations. Repeating the entire call every few seconds
+                // inflates latency and consumes context during long meetings.
+                let prior = Dictionary(uniqueKeysWithValues: coachSentTranscript.map { ($0.id, $0) })
+                let currentIDs = Set(call.transcript.map(\.id))
+                let removed = prior.keys.filter { !currentIDs.contains($0) }.map { "[segment \($0)] Removed or merged: disregard its previous standalone wording." }
+                let changed = call.transcript.filter { prior[$0.id] != $0 }.map { "[segment \($0.id), \($0.timestamp)] \($0.speaker)\($0.isFinal ? "" : " [partial]"): \($0.text)" }
+                let updates = (removed + changed).joined(separator: "\n")
+                let preparation = isFreshThread ? "\(call.preparationText)\n\nUSER BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")\n\n" : ""
+                let text = "\(preparation)TRANSCRIPT UPDATES (replace earlier versions with the same segment ID; use preparation already in this thread):\n\(updates.suffix(26000))\n\nLIVE STATE: \(audio.localSpeaking ? "The user is speaking." : "The user is listening or there is a pause.")\n\n\(question.map { "THE USER ASKS YOU DIRECTLY: \($0)" } ?? (needsIntroduction ? "This is the start of a new call session. Prepare the opening introduction now." : "Give the one best next recommendation now."))"
                 let result = try await codex.run(threadID: thread, text: text, live: true, schema: Recommendation.schema)
                 guard activeCallID == callID, activeSession == sessionID, !callEnding, !Task.isCancelled, transcriptEditGeneration == editGeneration else { return }
                 let cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
@@ -381,7 +393,7 @@ final class AppState: ObservableObject {
                     acceptRecommendation(next)
                     if next.kind == "INTRO" { modify(callID) { $0.intro = next.answer } }
                 }
-                coachTurns += 1; coachedRevision = revision; coachingStatus = ""
+                coachTurns += 1; coachedRevision = revision; coachSentTranscript = call.transcript; coachingStatus = ""
             } catch is CancellationError { }
             catch { if activeSession == sessionID { coachingStatus = "Coaching paused: \(error.localizedDescription)"; coachThread = nil } }
         }

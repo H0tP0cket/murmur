@@ -40,6 +40,8 @@ final class LibraryStore {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try encoder.encode(record).write(to: folder.appendingPathComponent("call.json"), options: .atomic)
         try record.preparationText.write(to: folder.appendingPathComponent("preparation.md"), atomically: true, encoding: .utf8)
+        let conversation = record.messages.map { "## \($0.role.uppercased())\n\n\($0.text)" }.joined(separator: "\n\n")
+        try conversation.write(to: folder.appendingPathComponent("conversation.md"), atomically: true, encoding: .utf8)
         try record.transcriptText.write(to: folder.appendingPathComponent("transcript.txt"), atomically: true, encoding: .utf8)
     }
 

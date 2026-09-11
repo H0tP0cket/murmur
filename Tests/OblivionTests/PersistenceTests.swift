@@ -42,6 +42,20 @@ import Testing
     #expect(try Data(contentsOf: url) == original)
 }
 
+@Test @MainActor func longIntakeRetainsInitialGoalAndFullConversationSource() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-test-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let library = try LibraryStore(root: root)
+    var call = CallRecord()
+    call.messages = [ChatMessage(role: "user", text: "Initial goal: understand ownership, not pitch."), ChatMessage(role: "assistant", text: String(repeating: "Preparation discussion. ", count: 1600) + "Middle fact: use the approved production story." + String(repeating: "More discussion. ", count: 1600)), ChatMessage(role: "user", text: "Latest decision: lead with the workflow question.")]
+    #expect(call.preparationText.contains("Initial goal: understand ownership, not pitch."))
+    #expect(call.preparationText.contains("Latest decision: lead with the workflow question."))
+    try library.save(call)
+    let full = try String(contentsOf: library.directory(call.id).appendingPathComponent("conversation.md"), encoding: .utf8)
+    #expect(full.contains("Middle fact: use the approved production story."))
+    #expect(full.count > 50000)
+}
+
 @Test @MainActor func coachingHoldsFullAnswersWhileSpeakingAndPinned() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-test-\(UUID())")
     defer { try? FileManager.default.removeItem(at: root) }
@@ -111,7 +125,22 @@ import Testing
     } catch is CancellationError { }
     let replacement = try await service.run(threadID: thread, text: "Reply with exactly replacement-complete and nothing else.", live: true)
     #expect(cancellationRequested)
-    #expect(replacement.trimmingCharacters(in: .whitespacesAndNewlines) == "replacement-complete")
+    let replacementText = (try? JSONDecoder().decode(String.self, from: Data(replacement.utf8))) ?? replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(replacementText == "replacement-complete")
+    var disconnectedDuringReply = false
+    do {
+        _ = try await service.run(threadID: thread, text: "Write a detailed 2500-word guide to interview preparation.", live: true, onText: { text in
+            if text.count > 20 && !disconnectedDuringReply { disconnectedDuringReply = true; service.disconnect() }
+        })
+        Issue.record("Expected the interrupted process to fail its pending reply.")
+    } catch { #expect(error.localizedDescription.contains("disconnected")) }
+    #expect(disconnectedDuringReply)
+    #expect(!service.isConnected)
+    try await service.connect()
+    let fresh = try await service.thread(cwd: root, live: true)
+    let recovered = try await service.run(threadID: fresh, text: "Reply with exactly reconnected and nothing else.", live: true)
+    let recoveredText = (try? JSONDecoder().decode(String.self, from: Data(recovered.utf8))) ?? recovered.trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(recoveredText == "reconnected")
 }
 
 @Test func volatileTranscriptRevisionsPreserveNegationAndSeparateSources() {

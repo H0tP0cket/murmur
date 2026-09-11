@@ -118,7 +118,7 @@ final class CodexService: ObservableObject {
                         if let model = model(live: live) {
                             params["model"] = model
                             if let option = models.first(where: { $0.id == model }) {
-                                params["effort"] = live ? (option.efforts.contains("low") ? "low" : option.defaultEffort) : (option.efforts.contains("medium") ? "medium" : option.defaultEffort)
+                                params["effort"] = live ? (["none", "low"].first(where: option.efforts.contains) ?? option.defaultEffort) : (option.efforts.contains("medium") ? "medium" : option.defaultEffort)
                             }
                         }
                         if let schema { params["outputSchema"] = schema }
