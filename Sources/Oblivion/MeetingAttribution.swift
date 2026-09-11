@@ -30,14 +30,14 @@ final class MeetingAttribution: ObservableObject {
     @Published var participants: [String] = []
     private var root: URL?
     private var session: UUID?
-    private var startedAt = Date()
+    private var elapsedTime: () -> Double = { 0 }
     private var timer: Timer?
     private var samples: [(time: Double, name: String?)] = []
     private var boundRoom: String?
     private var scanningZoom = false
 
-    func start(root: URL, session: UUID, source: String) {
-        stop(); self.root = root; self.session = session; startedAt = Date(); boundRoom = nil
+    func start(root: URL, session: UUID, source: String, elapsedTime: @escaping () -> Double) {
+        stop(); self.root = root; self.session = session; self.elapsedTime = elapsedTime; boundRoom = nil
         status = source == "com.google.Chrome" ? "Connect the Meet companion for names." : source == "us.zoom.xos" ? "Checking Zoom speaker names…" : "Choose Chrome or Zoom audio to attach speaker names."
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick(source: source) }
@@ -93,7 +93,7 @@ final class MeetingAttribution: ObservableObject {
     }
 
     private func record(_ name: String?) {
-        samples.append((Date().timeIntervalSince(startedAt), name))
+        samples.append((elapsedTime(), name))
         if samples.count > 16000 { samples.removeFirst(2000) }
     }
 

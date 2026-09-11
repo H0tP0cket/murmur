@@ -16,3 +16,36 @@
 - Native messaging tests verify that the Meet bridge accepts only its fixed extension origin, rejects expired calls, writes owner-only metadata, and never copies transcript payloads.
 - Current Meet roster and participant tile selectors were inspected in an isolated live Meet session with computer use. Extension loading, multi-person speaking signals, and Zoom labels still need real UI verification.
 - Microphone capture testing is waiting for the user to approve a system-owned permission prompt that computer use cannot operate.
+
+## Native UI and real Chrome capture
+
+Computer use exercised the following in the built application with two clearly fictional calls:
+
+- Free-form preparation with real streamed Codex responses; separate call histories, stopped response recovery, and persistence after relaunch.
+- Imported a selectable-text PDF through NSOpenPanel. Codex correctly answered its threshold, reviewer count, and duration. Requested current Apple documentation research; a source-linked response appeared after the real research tool ran.
+- Created and saved a full approved story with matching-question cues; confirmed its exact wording survived restart.
+- Edited manual notes and generated notes. A subsequent AI update appeared as a proposal and preserved the user's edited wording until accepted.
+- Inspected light/dark main chat and long responses. Fixed an infinite SwiftUI layout loop caused by competing scroll anchoring and an unconstrained attachment strip. Streaming now follows the bottom unless the user scrolls away.
+- Granted Screen & System Audio Recording through System Settings. Captured an actual native Chrome Incognito tab playing a 20-second synthetic speech fixture through the app-scoped ScreenCaptureKit stream. This is real OS capture of generated test speech, not a mocked transcript or a real human interview. Diagnostic audio metadata confirmed 48 kHz buffers and nonzero RMS.
+- Six accurate captured passages preserved negation, $50,000, three reviewers, 40 minutes, downstream rework, and the production-ownership question. That question automatically displayed the complete approved 133-word story in the upper HUD. The expanded panel fit the full answer.
+- A private question about threshold and duration returned the correct $50,000/40-minute answer while the call continued. Return to chat and Pop out preserved the active session. Local menu shortcuts for pop-out/return worked.
+- Searched the captured transcript, changed a speaker to Morgan, edited a passage while preserving its original, and used Ask about this to populate the composer with the corrected passage and timestamp. Exported Markdown through NSSavePanel and verified the corrected transcript in the resulting file.
+- Imported a separate timestamped text transcript through NSOpenPanel; times and speaker names were retained.
+- End call finalized capture and generated a grounded summary. The summary correctly said no answer to the final question had been recorded, despite the HUD having suggested one.
+
+The HUD Hide button removed the HUD; subsequent computer-use app activation reopened the main window. A physical global-hotkey test from another application remains open: registration succeeded, but CUA's application-targeted synthetic keystroke did not establish global interception.
+
+## Recovery and regression checks
+
+- Ten enabled tests passed (one additional speech test was skipped in that run). The real App Server test now interrupts a long streamed turn and immediately starts another on the same thread, which finishes with the expected new response. Notifications are correlated by turn ID and old-process output is rejected.
+- The actual on-device SpeechAnalyzer test passed again after startup/stop hardening: five final passages, 20.16125 seconds converted versus 20.16127 seconds of source audio.
+- Added stable-answer tests for local speaking, pending recommendations, pin/unpin, and brief coaching updates. Added automatic speaker revision versus manual override coverage.
+- A corrupt call is reported and left untouched while healthy calls still load.
+- Audited and fixed startup cancellation, cleanup of each capture attempt, stale SCStream callbacks, inference cancellation delaying audio shutdown, concurrent End/Quit waiting for finalization, and speaker/transcript clock alignment.
+
+## External checks still open
+
+- Actual microphone/headphone capture, device changes, and human overlapping speech. Microphone approval was requested, but computer-use automatic review refused access to the system-owned UserNotificationCenter app. No microphone test is claimed as passed.
+- Meet extension loading and multi-person attribution. The app installed the native host and extension files; bridge isolation tests pass. Browser policy explicitly blocked chrome://extensions and prohibited alternate automation routes. The user has been asked to load the unpacked extension manually.
+- Zoom native Accessibility labels and multi-person attribution, prolonged calls, connection/usage-limit behavior under real service failure, and receiver-side tab/window sharing.
+- These remaining checks are not implied by the successful synthetic-audio integration.

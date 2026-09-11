@@ -14,10 +14,12 @@ final class CodexService: ObservableObject {
     private var connectTask: Task<Void, Error>?
 
     private final class TurnWaiter {
+        var requestID = UUID()
         var continuation: CheckedContinuation<String, Error>?
         var text = ""
         var turnID: String?
         var cancelled = false
+        var queuedEvents: [(String, [String: Any])] = []
         var onText: (String) -> Void
         var onStatus: (String) -> Void
         init(_ continuation: CheckedContinuation<String, Error>, onText: @escaping (String) -> Void, onStatus: @escaping (String) -> Void) {
@@ -28,7 +30,7 @@ final class CodexService: ObservableObject {
     func connect() async throws {
         if isConnected { return }
         if let task = connectTask { return try await task.value }
-        let task = Task { try await self.start() }
+        let task = Task { do { try await self.start() } catch { self.disconnect(); throw error } }
         connectTask = task
         defer { connectTask = nil }
         try await task.value
@@ -48,7 +50,10 @@ final class CodexService: ObservableObject {
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { handle.readabilityHandler = nil; return }
-            Task { @MainActor in self?.receive(data) }
+            Task { @MainActor in
+                guard let self, self.process === proc else { return }
+                self.receive(data)
+            }
         }
         stderr.fileHandleForReading.readabilityHandler = { handle in if handle.availableData.isEmpty { handle.readabilityHandler = nil } }
         proc.terminationHandler = { [weak self] ended in Task { @MainActor in
@@ -84,22 +89,28 @@ final class CodexService: ObservableObject {
 
     func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false) async throws -> String {
         try await connect()
+        try Task.checkCancellation()
         if let existing {
             _ = try await request("thread/resume", ["threadId": existing, "cwd": cwd.path])
+            try Task.checkCancellation()
             return existing
         }
         var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": live ? Prompts.coach : Prompts.assistant, "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
         if let model = model(live: live) { params["model"] = model }
         let result = try await request("thread/start", params)
         guard let id = (result["thread"] as? [String: Any])?["id"] as? String else { throw OblivionError.message("Codex didn’t return a conversation.") }
+        try Task.checkCancellation()
         return id
     }
 
     func run(threadID: String, text: String, live: Bool = false, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
+        try Task.checkCancellation()
         guard turns[threadID] == nil else { throw OblivionError.message("This conversation is still responding.") }
+        let requestID = UUID()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 let waiter = TurnWaiter(continuation, onText: onText, onStatus: onStatus)
+                waiter.requestID = requestID
                 turns[threadID] = waiter
                 Task {
                     do {
@@ -112,23 +123,27 @@ final class CodexService: ObservableObject {
                         }
                         if let schema { params["outputSchema"] = schema }
                         let result = try await request("turn/start", params)
+                        guard turns[threadID] === waiter else { return }
                         waiter.turnID = (result["turn"] as? [String: Any])?["id"] as? String
+                        guard waiter.turnID != nil else { throw OblivionError.message("Codex didn’t identify this response.") }
+                        let queued = waiter.queuedEvents; waiter.queuedEvents = []
+                        for (method, params) in queued { handleNotification(method, params: params, threadID: threadID, waiter: waiter) }
                         if waiter.cancelled { await cancel(threadID: threadID) }
-                    } catch { finish(threadID, .failure(error)) }
+                    } catch { if turns[threadID] === waiter { finish(threadID, .failure(error)) } }
                 }
                 Task {
                     try? await Task.sleep(for: .seconds(live ? 60 : 240))
                     if turns[threadID] === waiter {
                         await cancel(threadID: threadID)
-                        finish(threadID, .failure(OblivionError.message("Codex took too long. Your context is saved; try again.")))
+                        if turns[threadID] === waiter { finish(threadID, .failure(OblivionError.message("Codex took too long. Your context is saved; try again."))) }
                     }
                 }
             }
-        }, onCancel: { Task { @MainActor in await self.cancel(threadID: threadID) } })
+        }, onCancel: { Task { @MainActor in await self.cancel(threadID: threadID, requestID: requestID) } })
     }
 
-    func cancel(threadID: String) async {
-        guard let waiter = turns[threadID] else { return }
+    func cancel(threadID: String, requestID: UUID? = nil) async {
+        guard let waiter = turns[threadID], requestID == nil || waiter.requestID == requestID else { return }
         waiter.cancelled = true
         if let turnID = waiter.turnID {
             _ = try? await request("turn/interrupt", ["threadId": threadID, "turnId": turnID])
@@ -185,7 +200,15 @@ final class CodexService: ObservableObject {
                 try? send(["id": id, "result": result]); continue
             }
             guard let threadID = params["threadId"] as? String, let waiter = turns[threadID] else { continue }
-            if method == "item/agentMessage/delta", let delta = params["delta"] as? String {
+            if waiter.turnID == nil { waiter.queuedEvents.append((method, params)); continue }
+            handleNotification(method, params: params, threadID: threadID, waiter: waiter)
+        }
+    }
+
+    private func handleNotification(_ method: String, params: [String: Any], threadID: String, waiter: TurnWaiter) {
+        let eventTurnID = params["turnId"] as? String ?? (params["turn"] as? [String: Any])?["id"] as? String
+        guard turns[threadID] === waiter, let eventTurnID, eventTurnID == waiter.turnID else { return }
+        if method == "item/agentMessage/delta", let delta = params["delta"] as? String {
                 waiter.text += delta; waiter.onText(waiter.text)
             } else if method == "item/started", let item = params["item"] as? [String: Any], let type = item["type"] as? String, type != "agentMessage", type != "reasoning" {
                 waiter.onStatus(type == "webSearch" ? "Researching…" : "Working with your context…")
@@ -199,7 +222,6 @@ final class CodexService: ObservableObject {
                 else if (turn["status"] as? String) == "interrupted" || waiter.cancelled { finish(threadID, .failure(CancellationError())) }
                 else { finish(threadID, .success(text.isEmpty ? waiter.text : text)) }
             }
-        }
     }
 
     private func finish(_ thread: String, _ result: Result<String, Error>) {

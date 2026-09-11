@@ -18,7 +18,7 @@ struct DetailView: View {
             }
         }.background(Color(nsColor: .windowBackgroundColor).opacity(0.45))
             .sheet(item: $editingSegment) { segment in TranscriptEditor(segment: segment) { text, speaker in
-                if let id = state.selectedID { state.modify(id) { record in if let index = record.transcript.firstIndex(where: { $0.id == segment.id }) { record.transcript[index].correction = text == segment.original ? nil : text; record.transcript[index].speaker = speaker } } }
+                if let id = state.selectedID { state.editTranscript(callID: id, segmentID: segment.id, text: text, speaker: speaker) }
                 editingSegment = nil
             } }
     }
@@ -139,6 +139,8 @@ struct CallSetupView: View {
                 Text("Google Chrome (Meet)").tag("com.google.Chrome")
                 Text("Zoom Workplace").tag("us.zoom.xos")
             }.pickerStyle(.menu)
+            Toggle("Include my microphone", isOn: $state.includeMicrophone).font(.system(size: 12))
+            if !state.includeMicrophone { Text("Only meeting audio will be transcribed. Coaching cannot detect when you speak.").font(.system(size: 11)).foregroundStyle(.secondary) }
             VStack(alignment: .leading, spacing: 7) {
                 Label("Share a meeting tab or a separate application window.", systemImage: "macwindow")
                 Text("A full-display share may include the floating copilot. ⌘⇧Space instantly hides it. Tell participants you’re transcribing when appropriate.")

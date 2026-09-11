@@ -35,8 +35,32 @@ import Testing
     let url = library.directory(call.id).appendingPathComponent("call.json")
     let original = Data("corrupted fixture".utf8)
     try original.write(to: url)
-    #expect(throws: (any Error).self) { try library.load() }
+    let healthy = CallRecord(title: "Healthy call")
+    try library.save(healthy)
+    #expect(try library.load().map(\.id) == [healthy.id])
+    #expect(library.loadWarnings.count == 1)
     #expect(try Data(contentsOf: url) == original)
+}
+
+@Test @MainActor func coachingHoldsFullAnswersWhileSpeakingAndPinned() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-test-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = AppState(root: root, connect: false)
+    let first = Recommendation(kind: "ANSWER", coaching: "Lead with impact.", answer: "My complete approved story.")
+    let next = Recommendation(kind: "ASK", coaching: "Ask about ownership.", answer: "Who owns that work?")
+    state.acceptRecommendation(first)
+    state.audio.localSpeaking = true
+    state.acceptRecommendation(next)
+    #expect(state.recommendation.answer == first.answer)
+    #expect(state.recommendation.coaching == next.coaching)
+    state.audio.localSpeaking = false
+    state.audio.onSpeakingChanged(false)
+    #expect(state.recommendation.answer == next.answer)
+    state.recommendationPinned = true
+    state.acceptRecommendation(first)
+    #expect(state.recommendation.answer == next.answer)
+    state.recommendationPinned = false
+    #expect(state.recommendation.answer == first.answer)
 }
 
 @Test @MainActor func independentCallContextsAndArchiveSurviveRestart() throws {
@@ -75,6 +99,19 @@ import Testing
     #expect(!recommendation.answer.isEmpty)
     #expect(!recommendation.coaching.isEmpty)
     print("Codex integration passed: \(service.model(live: true) ?? "automatic"), \(result.count) characters.")
+    var cancellationRequested = false
+    do {
+        _ = try await service.run(threadID: thread, text: "Write a detailed 2500-word meeting preparation guide.", live: true, onText: { text in
+            if text.count > 20 && !cancellationRequested {
+                cancellationRequested = true
+                Task { await service.cancel(threadID: thread) }
+            }
+        })
+        Issue.record("Expected the long response to be interrupted.")
+    } catch is CancellationError { }
+    let replacement = try await service.run(threadID: thread, text: "Reply with exactly replacement-complete and nothing else.", live: true)
+    #expect(cancellationRequested)
+    #expect(replacement.trimmingCharacters(in: .whitespacesAndNewlines) == "replacement-complete")
 }
 
 @Test func volatileTranscriptRevisionsPreserveNegationAndSeparateSources() {
@@ -93,6 +130,20 @@ import Testing
     #expect(call.transcript[0].correction == "User's correction")
     #expect(call.transcript[1].speaker == "You")
     #expect(call.transcript.allSatisfy { $0.isFinal })
+}
+
+@Test func finalAttributionUpdatesAutomaticNamesButPreservesManualNames() {
+    var call = CallRecord(); let session = UUID()
+    let interim = SpeechUpdate(source: "meeting", text: "We do", start: 1, end: 2, isFinal: false)
+    let final = SpeechUpdate(source: "meeting", text: "We do not automate it.", start: 1, end: 4, isFinal: true)
+    TranscriptIngestor.apply(interim, speaker: "Meeting", session: session, to: &call)
+    TranscriptIngestor.apply(final, speaker: "Morgan", session: session, to: &call)
+    #expect(call.transcript[0].speaker == "Morgan")
+    call.transcript = []
+    TranscriptIngestor.apply(interim, speaker: "Meeting", session: session, to: &call)
+    call.transcript[0].speaker = "Taylor"; call.transcript[0].speakerEdited = true
+    TranscriptIngestor.apply(final, speaker: "Morgan", session: session, to: &call)
+    #expect(call.transcript[0].speaker == "Taylor")
 }
 
 @Test @MainActor func callDraftsDoNotLeakAcrossConversations() throws {
@@ -152,4 +203,18 @@ import Testing
     #expect(event.remoteSpeaker() == nil)
     #expect(ZoomSpeakerReader.explicitName("Morgan is speaking") == "Morgan")
     #expect(ZoomSpeakerReader.explicitName("Morgan's video") == nil)
+}
+
+@Test func transcriptImportRetainsRealTimesAndSpeakerNames() throws {
+    let session=UUID()
+    let plain=try TranscriptImporter.parse("00:03 Morgan: We do not automate it.\n00:12 Alex: Who owns it?",session:session)
+    #expect(plain.map(\.speaker) == ["Morgan","Alex"])
+    #expect(plain.map(\.start) == [3,12])
+    let vtt=try TranscriptImporter.parse("WEBVTT\n\n00:01:03.200 --> 00:01:08.500\n<v Morgan>Forty minutes.</v>\n",session:session)
+    #expect(vtt[0].speaker == "Morgan")
+    #expect(vtt[0].start == 63.2)
+    #expect(vtt[0].end == 68.5)
+    #expect(vtt[0].text == "Forty minutes.")
+    let untimed=try TranscriptImporter.parse("Morgan: No timestamps here.",session:session)
+    #expect(untimed[0].timestamp == "—")
 }

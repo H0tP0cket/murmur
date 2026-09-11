@@ -36,9 +36,10 @@ final class WindowCoordinator {
     func resizeHUD() {
         guard let panel, let state else { return }
         let width = max(460, panel.frame.width)
-        let textHeight = (state.recommendation.answer as NSString).boundingRect(with: NSSize(width: width - 52, height: 1600), options: [.usesLineFragmentOrigin], attributes: [.font: NSFont.systemFont(ofSize: 20)]).height
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 7
+        let textHeight = (state.recommendation.answer as NSString).boundingRect(with: NSSize(width: width - 52, height: 1600), options: [.usesLineFragmentOrigin], attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .medium), .paragraphStyle: paragraph]).height
         let screenHeight = panel.screen?.visibleFrame.height ?? 800
-        let height = min(screenHeight - 70, max(240, min(520, textHeight + 175)) + (state.showDirectQuestion ? 160 : 0))
+        let height = min(screenHeight - 70, max(270, min(screenHeight * 0.8, textHeight + 200)) + (state.showDirectQuestion ? 160 : 0))
         var frame = panel.frame; frame.origin.y += frame.height - height; frame.size.height = height
         panel.setFrame(frame, display: true, animate: false)
     }
@@ -88,6 +89,7 @@ final class CopilotPanel: NSPanel {
 struct HUDView: View {
     @EnvironmentObject var state: AppState
     @FocusState private var inputFocused: Bool
+    @AppStorage("appearance") private var appearance = "system"
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -104,9 +106,9 @@ struct HUDView: View {
             if state.showDirectQuestion {
                 Divider().opacity(0.5)
                 VStack(alignment: .leading, spacing: 9) {
-                    HStack { TextField("Ask about this call…", text: $state.directQuestion).textFieldStyle(.plain).focused($inputFocused).onSubmit { state.askDirect() }; Button { state.askDirect() } label: { Image(systemName: "arrow.up.circle.fill") }; Button { state.showDirectQuestion = false } label: { Image(systemName: "xmark") } }.buttonStyle(.plain).font(.system(size: 13))
-                    if state.coachingBusy { ProgressView().controlSize(.small) }
-                    if !state.directAnswer.isEmpty { ScrollView { Text(state.directAnswer).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 120) }
+                    HStack { TextField("Ask about this call…", text: $state.directQuestion).textFieldStyle(.plain).focused($inputFocused).onSubmit { state.askDirect() }; Button { state.askDirect() } label: { Image(systemName: "arrow.up.circle.fill") }.disabled(state.directBusy); Button { state.showDirectQuestion = false } label: { Image(systemName: "xmark") } }.buttonStyle(.plain).font(.system(size: 13))
+                    if state.directBusy { ProgressView().controlSize(.small) }
+                    if !state.directAnswer.isEmpty { ScrollView { Text(.init(state.directAnswer)).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 120) }
                 }.padding(.horizontal, 24).padding(.vertical, 13)
             }
             Divider().opacity(0.5)
@@ -125,6 +127,8 @@ struct HUDView: View {
             }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 13)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .ignoresSafeArea()
+        .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
         .onChange(of: state.recommendation.answer) { _, _ in state.windows.resizeHUD() }
         .onChange(of: state.showDirectQuestion) { _, shown in state.windows.resizeHUD(); inputFocused = shown }
         .onAppear { inputFocused = state.showDirectQuestion }
@@ -134,5 +138,5 @@ struct HUDView: View {
 
 struct AudioLevelsView: View {
     @ObservedObject var audio: AudioCapture
-    var body: some View { HStack(spacing: 5) { Image(systemName: "mic"); Capsule().fill(.primary.opacity(0.3)).frame(width: 3, height: max(3, audio.micLevel * 18)); Image(systemName: "speaker.wave.1"); Capsule().fill(.primary.opacity(0.3)).frame(width: 3, height: max(3, audio.meetingLevel * 18)) }.font(.system(size: 9)).frame(height: 18).help(audio.status) }
+    var body: some View { HStack(spacing: 5) { Image(systemName: "mic"); Capsule().fill(.primary.opacity(0.3)).frame(width: 3, height: max(3, audio.micLevel * 18)); Image(systemName: "speaker.wave.1"); Capsule().fill(.primary.opacity(0.3)).frame(width: 3, height: max(3, audio.meetingLevel * 18)) }.font(.system(size: 9)).frame(height: 18).help(audio.status).accessibilityElement(children: .ignore).accessibilityLabel("Microphone \(Int(audio.micLevel * 100)) percent, meeting audio \(Int(audio.meetingLevel * 100)) percent. \(audio.status)") }
 }

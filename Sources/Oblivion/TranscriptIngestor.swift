@@ -5,7 +5,7 @@ import Foundation
 enum TranscriptIngestor {
     static func apply(_ update: SpeechUpdate, speaker: String, session: UUID, to call: inout CallRecord) {
         let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, update.start.isFinite, update.end.isFinite else { return }
+        guard text.contains(where: { $0.isLetter || $0.isNumber }), update.start.isFinite, update.end.isFinite else { return }
         let matches: (TranscriptSegment) -> Bool = { segment in
             segment.sessionID == session && segment.source == update.source &&
             (abs(segment.start - update.start) < 0.2 || (segment.start < update.end && segment.end > update.start))
@@ -15,6 +15,7 @@ enum TranscriptIngestor {
         var next = provisional.first ?? TranscriptSegment(sessionID: session, source: update.source, speaker: speaker, start: update.start, end: update.end, original: text)
         next.start = max(0, update.start); next.end = max(next.start, update.end)
         next.original = text; next.isFinal = update.isFinal
+        if next.speakerEdited != true { next.speaker = speaker }
         let replacedIDs = Set(provisional.map(\.id))
         call.transcript.removeAll { replacedIDs.contains($0.id) }
         call.transcript.append(next)

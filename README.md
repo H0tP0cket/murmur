@@ -6,7 +6,7 @@ Before the call, think deeply. During the call, make me glance, not read. After 
 
 ## Status
 
-Implementation is underway. The native application builds and launches. Persistence tests and a real streaming/structured Codex App Server test pass. Live capture, meeting attribution, and end-to-end UI verification are still in progress.
+The native application is implemented and undergoing final integration testing. Real Chrome audio capture → on-device transcript → Codex coaching → exact prepared-story retrieval has passed through the running app. Preparation, PDF/link research, notes, transcript editing/import/export, direct questions, and post-call summaries have been exercised with computer use. Microphone authorization, the Chrome extension installation, and multi-person meeting/receiver-side checks remain open; see [the verification log](docs/TESTING.md).
 
 ## Run locally
 

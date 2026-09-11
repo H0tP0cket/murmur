@@ -6,6 +6,7 @@ struct MainView: View {
     @State private var sidebarVisible = true
     @State private var renameID: UUID?
     @State private var renameText = ""
+    @State private var followChat = true
     var body: some View {
         HStack(spacing: 0) {
             if sidebarVisible { sidebar.frame(width: 228); Divider() }
@@ -48,7 +49,7 @@ struct MainView: View {
                 }.padding(.horizontal, 10)
             }
             Spacer(minLength: 6)
-            if let active = state.activeCall { Button { state.selectedID = active.id; state.windows.showHUD() } label: { Label("Call in progress", systemImage: "waveform").font(.system(size: 12, weight: .medium)).foregroundStyle(.green).padding(12) }.buttonStyle(.plain) }
+            if let active = state.activeCall { Button { state.selectedID = active.id; state.windows.showHUD() } label: { Label(state.callStarting ? "Preparing audio…" : "Call in progress", systemImage: "waveform").font(.system(size: 12, weight: .medium)).foregroundStyle(.green).padding(12) }.buttonStyle(.plain) }
             HStack {
                 Button { state.showSettings = true } label: { Image(systemName: "gearshape").padding(8) }.buttonStyle(.plain).help("Settings")
                 Spacer()
@@ -97,14 +98,19 @@ struct MainView: View {
     private func conversation(_ call: CallRecord) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 28) {
                     ForEach(call.messages) { message in MessageRow(message: message, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
                     if state.isBusy { HStack(spacing: 8) { ProgressView().controlSize(.mini); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
                     Color.clear.frame(height: 1).id("bottom")
                 }.frame(maxWidth: 760).padding(.horizontal, 35).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: .infinity)
             }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: call.messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onScrollPhaseChange { _, phase in if phase == .interacting { followChat = false } }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 25
+            } action: { _, atBottom in if atBottom { followChat = true } }
+            .onChange(of: call.messages.count) { _, _ in followChat = true; proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: call.messages.last?.text) { _, _ in if followChat { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .id(call.id)
         }
     }
@@ -117,12 +123,12 @@ struct MainView: View {
                         HStack(spacing: 6) { Image(systemName: "doc.text"); Text(attachment.name).lineLimit(1); Button { state.modify(call.id) { $0.attachments.removeAll { $0.id == attachment.id } } } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).help("Remove from context") }
                             .font(.system(size: 11)).padding(8).background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     } }
-                }
+                }.frame(height: 36)
             }
             VStack(spacing: 6) {
                 ZStack(alignment: .topLeading) {
                     if state.composer.isEmpty { Text("Add context, ask a question, or paste a link…").font(.system(size: 14)).foregroundStyle(.tertiary).padding(.top, 10).padding(.leading, 5).allowsHitTesting(false) }
-                    ComposerEditor(text: $state.composer, onSubmit: { state.send() }).frame(minHeight: 55, maxHeight: 100)
+                    ComposerEditor(text: $state.composer, onSubmit: { state.send() }).frame(height: 78)
                 }
                 HStack {
                     Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17)).frame(width: 27, height: 27) }.buttonStyle(.plain).help("Attach PDF or text")
@@ -133,13 +139,24 @@ struct MainView: View {
                     }.buttonStyle(.plain).disabled(!state.isBusy && state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel(state.isBusy ? "Stop response" : "Send message")
                 }
             }.padding(13).background(Color(nsColor: .windowBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 23)).overlay(RoundedRectangle(cornerRadius: 23).stroke(.primary.opacity(0.09)))
-            Text(state.activeCallID == nil ? "Your context, ready when you need it." : "Listening continues while you’re in the chat.").font(.system(size: 10)).foregroundStyle(.tertiary)
+            CaptureStatusCaption(audio: state.audio, active: state.activeCallID != nil, starting: state.callStarting, ending: state.callEnding)
         }.frame(maxWidth: 760).padding(.horizontal, 30).padding(.bottom, 18).padding(.top, 10).frame(maxWidth: .infinity)
     }
 
     private func errorBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 10) { Image(systemName: "exclamationmark.circle"); Text(message).textSelection(.enabled); Spacer(); Button { state.error = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
             .font(.system(size: 12)).padding(13).background(Color.orange.opacity(0.09)).padding(.horizontal, 22).padding(.bottom, 8)
+    }
+}
+
+private struct CaptureStatusCaption: View {
+    @ObservedObject var audio: AudioCapture
+    var active: Bool
+    var starting: Bool
+    var ending: Bool
+    var body: some View {
+        Text(ending ? "Finishing your transcript…" : starting ? "Waiting for audio setup…" : !active ? "Your context, ready when you need it." : audio.isRunning ? "Listening continues while you’re in the chat." : "Audio interrupted. End and restart the call to resume.")
+            .font(.system(size: 10)).foregroundStyle(.tertiary)
     }
 }
 
@@ -175,10 +192,10 @@ struct MessageRow: View {
             else {
                 HStack(alignment: .top) {
                     if message.role == "user" { Spacer(minLength: 50) }
-                    Text(.init(message.text.isEmpty ? " " : message.text)).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled)
-                        .padding(message.role == "user" ? 15 : 0)
-                        .background(message.role == "user" ? Color.primary.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 20))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Group {
+                        if message.role == "user" { Text(message.text).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled).padding(15).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 20)) }
+                        else { MarkdownBody(text: message.text.isEmpty ? " " : message.text) }
+                    }.frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                     if message.role != "user" { Spacer(minLength: 0) }
                 }
                 if message.role == "assistant", !message.text.isEmpty {

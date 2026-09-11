@@ -4,6 +4,7 @@ import PDFKit
 @MainActor
 final class LibraryStore {
     let root: URL
+    private(set) var loadWarnings: [String] = []
     private let encoder: JSONEncoder = {
         let result = JSONEncoder()
         result.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -22,13 +23,14 @@ final class LibraryStore {
     func directory(_ id: UUID) -> URL { root.appendingPathComponent("Calls/\(id.uuidString)", isDirectory: true) }
 
     func load() throws -> [CallRecord] {
+        loadWarnings = []
         let folders = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("Calls"), includingPropertiesForKeys: nil)
         var records: [CallRecord] = []
         for folder in folders {
             let url = folder.appendingPathComponent("call.json")
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
             do { records.append(try decoder.decode(CallRecord.self, from: Data(contentsOf: url))) }
-            catch { throw OblivionError.message("Couldn’t read \(folder.lastPathComponent). Your saved file has been left intact. \(error.localizedDescription)") }
+            catch { loadWarnings.append("Couldn’t read \(folder.lastPathComponent). Your saved file has been left intact. \(error.localizedDescription)") }
         }
         return records.sorted { $0.updatedAt > $1.updatedAt }
     }

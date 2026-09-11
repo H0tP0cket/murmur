@@ -9,7 +9,7 @@ The build goal is active. This document lists acceptance criteria; completed che
 - Support streaming, cancellation, actionable connection failures, and conversation resume.
 - Persist call metadata and map it to the correct backend thread.
 - Integrate separate microphone and meeting/system audio capture with the required native permissions.
-- Use Apple SpeechAnalyzer/SpeechTranscriber for local live transcription; runtime availability and installed en-US assets have been verified, but capture and accuracy have not.
+- Use Apple SpeechAnalyzer/SpeechTranscriber for local live transcription; installed en-US assets, resampling accuracy, and actual Chrome audio capture have passed. Microphone permission/device verification remains open.
 - Feed new transcript context into a bounded App Server coaching loop and display real streamed advice.
 
 Acceptance: create two calls, chat in each using real App Server responses, restart, resume the correct histories, and verify that cancellation and reconnection do not corrupt or duplicate messages. Exercise actual microphone and system capture with known speech and verify transcript-driven advice. No mock answers in the ordinary app flow. The first usable release requires live functionality; deferring GPT-Live-1 does not make it a preparation-only app.

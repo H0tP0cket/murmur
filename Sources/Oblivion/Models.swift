@@ -6,6 +6,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var text: String
     var createdAt = Date()
     var interrupted = false
+    var pending: Bool?
 }
 
 struct Attachment: Codable, Identifiable, Equatable {
@@ -33,9 +34,11 @@ struct TranscriptSegment: Codable, Identifiable, Equatable {
     var end: Double
     var original: String
     var correction: String?
+    var speakerEdited: Bool?
     var isFinal = true
     var text: String { correction ?? original }
     var timestamp: String {
+        if source == "import-untimed" { return "—" }
         let seconds = max(0, Int(start))
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
@@ -73,7 +76,7 @@ struct CallRecord: Codable, Identifiable, Equatable {
         let chat = messages.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n")
         let approved = stories.filter(\.approved).map { "STORY ID \($0.id): \($0.title)\nUse for: \($0.cues)\n\($0.body)" }.joined(separator: "\n\n")
         let sources = attachments.map { "SOURCE \($0.name) \($0.sourceURL ?? "")\n\($0.text.prefix(10000))" }.joined(separator: "\n\n")
-        return "CALL: \(title)\n\nPREPARATION CHAT:\n\(chat.suffix(32000))\n\nAPPROVED STORIES:\n\(approved)\n\nSOURCES:\n\(sources.prefix(30000))\n\nUSER NOTES:\n\(notes)"
+        return "CALL: \(title)\n\nPREPARATION CHAT:\n\(chat.suffix(32000))\n\nAPPROVED STORIES:\n\(approved)\n\nSOURCES:\n\(sources.prefix(30000))\n\nUSER NOTES:\n\(notes)\n\nCALL NOTES SO FAR:\n\(generatedNotes)"
     }
 }
 
