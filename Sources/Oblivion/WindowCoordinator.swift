@@ -46,6 +46,7 @@ final class WindowCoordinator {
 
     func returnToChat() {
         panel?.orderOut(nil); state?.hudVisible = false
+        if mainWindow?.isMiniaturized == true { mainWindow?.deminiaturize(nil) }
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func toggleHUD() {

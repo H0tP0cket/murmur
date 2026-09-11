@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 struct DetailView: View {
     @EnvironmentObject var state: AppState
@@ -175,6 +176,7 @@ struct SettingsView: View {
                     TextField("Executable path (optional)", text: $codexPath)
                     Button("Reconnect") { state.codex.disconnect(); Task { await state.reconnect() } }
                 }
+                Section("Audio access") { AudioPermissionStatusView() }
                 Section("Speaker names") {
                     AttributionStatusView(attribution: state.attribution)
                     Button("Set up Meet companion…") {
@@ -204,4 +206,33 @@ struct CodexStatusView: View {
 struct AttributionStatusView: View {
     @ObservedObject var attribution: MeetingAttribution
     var body: some View { Text(attribution.status).font(.system(size: 12)).foregroundStyle(.secondary) }
+}
+
+private struct AudioPermissionStatusView: View {
+    @State private var microphone = AVCaptureDevice.authorizationStatus(for: .audio)
+    @State private var screenAudio = false
+    private var microphoneLabel: String {
+        switch microphone {
+        case .authorized: return "Allowed"
+        case .notDetermined: return "Approval needed"
+        case .denied: return "Not allowed"
+        case .restricted: return "Restricted by this Mac"
+        @unknown default: return "Unavailable"
+        }
+    }
+    var body: some View {
+        LabeledContent("Microphone", value: microphoneLabel)
+        LabeledContent("Screen & system audio", value: screenAudio ? "Allowed" : "Not allowed")
+        if microphone != .authorized || !screenAudio {
+            Text("Start call requests the access it needs. Review permissions in System Settings → Privacy & Security if access was declined.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+        Button("Refresh access status") { refresh() }.font(.system(size: 11))
+            .onAppear { refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+    private func refresh() {
+        microphone = AVCaptureDevice.authorizationStatus(for: .audio)
+        screenAudio = CGPreflightScreenCaptureAccess()
+    }
 }

@@ -45,7 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await state.endCall(summarize: false); state.codex.disconnect(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { state?.windows.returnToChat(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let state, state.windows.mainWindow != nil else { return true }
+        state.windows.returnToChat()
+        // We handled the reopen. Default handling may create an extra SwiftUI
+        // window because floating NSPanel instances do not count as main windows.
+        return false
+    }
 }
 
 struct WindowReader: NSViewRepresentable {
