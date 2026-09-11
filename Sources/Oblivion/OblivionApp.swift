@@ -5,14 +5,19 @@ import AppKit
 struct OblivionApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var state = AppState()
-    @AppStorage("appearance") private var appearance = "system"
 
     var body: some Scene {
         WindowGroup("Oblivion", id: "main") {
             MainView().environmentObject(state)
-                .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
+                .preferredColorScheme(.dark)
+                .tint(OblivionStyle.blue)
                 .frame(minWidth: 900, minHeight: 600)
-                .background(WindowReader { window in state.windows.mainWindow = window; delegate.state = state })
+                .background(WindowReader { window in
+                    window.appearance = NSAppearance(named: .darkAqua)
+                    window.titlebarAppearsTransparent = true
+                    window.backgroundColor = OblivionStyle.windowColor
+                    state.windows.mainWindow = window; delegate.state = state
+                })
         }
         .defaultSize(width: 1120, height: 760)
         .windowStyle(.hiddenTitleBar)
@@ -39,6 +44,9 @@ struct OblivionApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var state: AppState?
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let state, state.activeCallID != nil else { state?.codex.disconnect(); return .terminateNow }

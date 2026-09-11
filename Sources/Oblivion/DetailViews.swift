@@ -7,6 +7,7 @@ struct DetailView: View {
     var detail: AppState.Detail
     @State private var search = ""
     @State private var editingSegment: TranscriptSegment?
+    @State private var editingNotes = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack { Text(detail.rawValue).font(.system(size: 14, weight: .semibold)); Spacer(); Button { state.detail = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(.secondary) }.padding(20)
@@ -17,7 +18,8 @@ struct DetailView: View {
                 case .transcript: transcript(call)
                 }
             }
-        }.background(Color(nsColor: .windowBackgroundColor).opacity(0.45))
+        }.background(OblivionStyle.canvas)
+            .onChange(of: state.selectedID) { _, _ in editingNotes = false }
             .sheet(item: $editingSegment) { segment in TranscriptEditor(segment: segment) { text, speaker in
                 if let id = state.selectedID { state.editTranscript(callID: id, segmentID: segment.id, text: text, speaker: speaker) }
                 editingSegment = nil
@@ -28,10 +30,19 @@ struct DetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("YOUR NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
-                TextEditor(text: Binding(get: { state.selected?.notes ?? "" }, set: { value in state.modify(call.id) { $0.notes = value } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 190).padding(6).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-                HStack { Text("CALL NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary); Spacer(); Button { state.updateNotes(callID: call.id) } label: { Label("Update", systemImage: "sparkles") }.font(.system(size: 11)).disabled(state.notesBusy.contains(call.id)) }
+                ZStack(alignment: .topLeading) {
+                    if call.notes.isEmpty { Text("Jot something down…").font(.system(size: 13)).foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.top, 1).allowsHitTesting(false) }
+                    TextEditor(text: Binding(get: { state.selected?.notes ?? "" }, set: { value in state.modify(call.id) { $0.notes = value } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(height: 100).accessibilityLabel("Your notes")
+                }.padding(10).background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.05)))
+                HStack(spacing: 10) {
+                    Text("CALL NOTES").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
+                    Spacer()
+                    if !call.generatedNotes.isEmpty { Button(editingNotes ? "Done" : "Edit") { editingNotes.toggle() }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary) }
+                    Button { state.updateNotes(callID: call.id) } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).font(.system(size: 11)).help("Update call notes").accessibilityLabel("Update call notes").disabled(state.notesBusy.contains(call.id))
+                }
                 if call.generatedNotes.isEmpty { Text("Findings, open questions, and follow-ups will live here. Your own notes above stay yours.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4) }
-                else { TextEditor(text: Binding(get: { state.selected?.generatedNotes ?? "" }, set: { value in state.modify(call.id) { $0.generatedNotes = value; $0.generatedNotesEdited = true } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320) }
+                else if editingNotes { TextEditor(text: Binding(get: { state.selected?.generatedNotes ?? "" }, set: { value in state.modify(call.id) { $0.generatedNotes = value; $0.generatedNotesEdited = true } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320).accessibilityLabel("Edit call notes") }
+                else { MarkdownBody(text: call.generatedNotes, fontSize: 13) }
                 if let suggestion = call.suggestedNotes {
                     DisclosureGroup("Updated notes ready") {
                         Text(suggestion).font(.system(size: 12)).textSelection(.enabled).padding(.vertical, 8)
@@ -155,7 +166,6 @@ struct CallSetupView: View {
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("appearance") private var appearance = "system"
     @AppStorage("personalBackground") private var background = ""
     @AppStorage("prepModel") private var prepModel = ""
     @AppStorage("liveModel") private var liveModel = ""
@@ -168,7 +178,6 @@ struct SettingsView: View {
                     Text("Your background, preferred introduction, and facts you want available across calls.").font(.system(size: 12)).foregroundStyle(.secondary)
                     TextEditor(text: $background).font(.system(size: 13)).frame(height: 100)
                 }
-                Section("Appearance") { Picker("Theme", selection: $appearance) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") } }
                 Section("Codex") {
                     CodexStatusView(service: state.codex)
                     Picker("Preparation", selection: $prepModel) { Text("Automatic").tag(""); ForEach(state.codex.models) { Text($0.name).tag($0.id) } }

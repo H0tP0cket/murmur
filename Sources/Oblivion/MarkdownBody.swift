@@ -4,19 +4,20 @@ import SwiftUI
 /// are rendered by SwiftUI, with no embedded browser or remote resources.
 struct MarkdownBody: View {
     let text: String
+    var fontSize: CGFloat = 15
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block.kind {
                 case .heading:
-                    Text(.init(block.text)).font(.system(size: block.level == 1 ? 20 : 16, weight: .semibold)).padding(.top, 6).textSelection(.enabled)
+                    Text(.init(block.text)).font(.system(size: block.level == 1 ? fontSize + 5 : fontSize + 1, weight: .semibold)).padding(.top, 6).textSelection(.enabled)
                 case .code:
                     ScrollView(.horizontal) { Text(block.text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled).padding(12) }
                         .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
                 case .quote:
-                    Text(.init(block.text)).font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(5).textSelection(.enabled).padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(.primary.opacity(0.15)).frame(width: 2) }
+                    Text(.init(block.text)).font(.system(size: fontSize - 1)).foregroundStyle(.secondary).lineSpacing(5).textSelection(.enabled).padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(.primary.opacity(0.15)).frame(width: 2) }
                 case .text:
-                    Text(.init(block.text)).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Text(.init(block.text)).font(.system(size: fontSize)).lineSpacing(fontSize > 13 ? 6 : 4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)

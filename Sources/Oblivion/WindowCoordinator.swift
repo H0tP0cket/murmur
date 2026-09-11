@@ -19,7 +19,8 @@ final class WindowCoordinator {
             panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.isMovableByWindowBackground = true; panel.minSize = NSSize(width: 460, height: 230)
-            panel.isReleasedWhenClosed = false; panel.backgroundColor = .windowBackgroundColor
+            panel.isReleasedWhenClosed = false; panel.backgroundColor = OblivionStyle.windowColor
+            panel.appearance = NSAppearance(named: .darkAqua)
             panel.standardWindowButton(.closeButton)?.isHidden = true
             panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
             panel.standardWindowButton(.zoomButton)?.isHidden = true
@@ -90,7 +91,6 @@ final class CopilotPanel: NSPanel {
 struct HUDView: View {
     @EnvironmentObject var state: AppState
     @FocusState private var inputFocused: Bool
-    @AppStorage("appearance") private var appearance = "system"
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -127,9 +127,9 @@ struct HUDView: View {
                 Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)
             }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 13)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(OblivionStyle.canvas)
         .ignoresSafeArea()
-        .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
+        .preferredColorScheme(.dark)
         .onChange(of: state.recommendation.answer) { _, _ in state.windows.resizeHUD() }
         .onChange(of: state.showDirectQuestion) { _, shown in state.windows.resizeHUD(); inputFocused = shown }
         .onAppear { inputFocused = state.showDirectQuestion }

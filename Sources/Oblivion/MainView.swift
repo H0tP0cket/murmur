@@ -7,9 +7,12 @@ struct MainView: View {
     @State private var renameID: UUID?
     @State private var renameText = ""
     @State private var followChat = true
+    @State private var composerHeight: CGFloat = 32
+    @State private var composerFocused = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         HStack(spacing: 0) {
-            if sidebarVisible { sidebar.frame(width: 228); Divider() }
+            if sidebarVisible { sidebar.frame(width: 224) }
             VStack(spacing: 0) {
                 header
                 if let message = state.error { errorBanner(message) }
@@ -22,8 +25,9 @@ struct MainView: View {
                     if let detail = state.detail, state.selected != nil { Divider(); DetailView(detail: detail).frame(width: 340) }
                 }
             }
-            .background(Color(nsColor: .textBackgroundColor))
+            .background(OblivionStyle.canvas)
         }
+        .ignoresSafeArea(.container, edges: .top)
         .sheet(isPresented: $state.showCallSetup) { CallSetupView().environmentObject(state) }
         .sheet(isPresented: $state.showSettings) { SettingsView().environmentObject(state) }
         .sheet(item: $state.editingStory) { story in StoryEditor(story: story).environmentObject(state) }
@@ -36,9 +40,13 @@ struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Text("Oblivion").font(.system(size: 16, weight: .semibold)); Spacer(); Image(systemName: "waveform").foregroundStyle(.secondary) }.padding(.top, 43).padding(.horizontal, 20).padding(.bottom, 22)
-            Button { state.newCall() } label: { Label("New call", systemImage: "square.and.pencil").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(11).background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10)) }
-                .buttonStyle(.plain).padding(.horizontal, 12).accessibilityIdentifier("newCall")
+            HStack(spacing: 10) { OblivionMark(size: 27); Text("Oblivion").font(.system(size: 16, weight: .semibold)).tracking(-0.3); Spacer() }.padding(.top, 39).padding(.horizontal, 19).padding(.bottom, 21)
+            Button { state.newCall() } label: {
+                HStack { Label("New call", systemImage: "square.and.pencil"); Spacer(); Text("⌘N").font(.system(size: 10)).foregroundStyle(.tertiary) }
+                    .font(.system(size: 13, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 11)
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 11))
+                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.055), lineWidth: 0.5))
+            }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 12).accessibilityIdentifier("newCall")
             HStack(spacing: 7) { Image(systemName: "magnifyingglass"); TextField("Search calls", text: $state.sidebarSearch).textFieldStyle(.plain) }.font(.system(size: 12)).foregroundStyle(.secondary).padding(10).padding(.horizontal, 9).padding(.top, 9)
             HStack { Text(state.showArchived ? "ARCHIVED" : "RECENT").font(.system(size: 10, weight: .semibold)).tracking(1); Spacer() }.foregroundStyle(.tertiary).padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 9)
             ScrollView {
@@ -55,7 +63,8 @@ struct MainView: View {
                 Spacer()
                 Button { state.showArchived.toggle() } label: { Image(systemName: state.showArchived ? "bubble.left.and.bubble.right" : "archivebox").padding(8) }.buttonStyle(.plain).help(state.showArchived ? "Recent calls" : "Archived calls")
             }.foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 13)
-        }.background(Color(nsColor: .windowBackgroundColor))
+        }.background(SidebarSurface())
+            .overlay(alignment: .trailing) { Rectangle().fill(.primary.opacity(0.055)).frame(width: 0.5) }
     }
 
     private var header: some View {
@@ -64,12 +73,15 @@ struct MainView: View {
             Text(state.selected?.title ?? "Oblivion").font(.system(size: 14, weight: .medium)).lineLimit(1)
             Spacer(minLength: 8)
             if state.selected != nil {
-                Button { withAnimation { state.detail = state.detail == .notes ? nil : .notes } } label: { Image(systemName: "note.text") }.buttonStyle(.plain).help("Notes")
-                Button { withAnimation { state.detail = state.detail == .stories ? nil : .stories } } label: { Image(systemName: "rectangle.stack") }.buttonStyle(.plain).help("Prepared answers")
+                HStack(spacing: 2) {
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { state.detail = state.detail == .notes ? nil : .notes } } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.help("Notes")
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { state.detail = state.detail == .stories ? nil : .stories } } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Prepared answers")
+                }.buttonStyle(QuietButtonStyle())
                 if state.activeCallID != nil { Button("End call") { Task { await state.endCall() } }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(state.callEnding) }
                 Button { if state.activeCallID != nil { state.windows.showHUD() } else { state.showCallSetup = true } } label: {
                     Label(state.callStarting ? "Starting…" : state.activeCallID == nil ? "Start call" : "Pop out", systemImage: "arrow.up.right")
-                        .font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 8).background(.primary.opacity(0.065), in: Capsule())
+                        .font(.system(size: 12, weight: .medium)).padding(.horizontal, 14).padding(.vertical, 9)
+                        .glassEffect(.regular.interactive(), in: Capsule())
                 }.buttonStyle(.plain).disabled(state.callStarting || state.callEnding)
             }
         }.padding(.horizontal, 22).frame(height: 66)
@@ -78,7 +90,7 @@ struct MainView: View {
     private var welcome: some View {
         VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "waveform").font(.system(size: 30, weight: .light)).frame(width: 68, height: 68).background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22)).padding(.bottom, 8)
+            OblivionMark(size: 62).padding(.bottom, 8)
             Text("A little preparation.\nA better conversation.").font(.system(size: 29, weight: .medium)).multilineTextAlignment(.center)
             Text("Talk through your next call. Bring your context,\nyour questions, and what you want to accomplish.").font(.system(size: 14)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineSpacing(5)
             HStack(spacing: 8) {
@@ -99,8 +111,14 @@ struct MainView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    ForEach(call.messages) { message in MessageRow(message: message, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
-                    if state.isBusy { HStack(spacing: 8) { ProgressView().controlSize(.mini); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
+                    if call.messages.count == 1, call.messages.first?.role == "assistant" {
+                        VStack(alignment: .leading, spacing: 18) {
+                            OblivionMark(size: 48)
+                            Text("Let’s get you ready.").font(.system(size: 30, weight: .semibold)).tracking(-0.8)
+                        }.padding(.top, 60).padding(.bottom, 2)
+                    }
+                    ForEach(call.messages) { message in MessageRow(message: message, showActions: call.messages.count > 1, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
+                    if state.isBusy { HStack(spacing: 8) { Image(systemName: "sparkle").foregroundStyle(OblivionStyle.blue).symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
                     Color.clear.frame(height: 1).id("bottom")
                 }.frame(maxWidth: 760).padding(.horizontal, 35).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: .infinity)
             }
@@ -125,22 +143,26 @@ struct MainView: View {
                     } }
                 }.frame(height: 36)
             }
-            VStack(spacing: 6) {
+            HStack(alignment: .bottom, spacing: 9) {
+                Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach PDF or text")
                 ZStack(alignment: .topLeading) {
-                    if state.composer.isEmpty { Text("Add context, ask a question, or paste a link…").font(.system(size: 14)).foregroundStyle(.tertiary).padding(.top, 10).padding(.leading, 5).allowsHitTesting(false) }
-                    ComposerEditor(text: $state.composer, onSubmit: { state.send() }).frame(height: 78)
+                    if state.composer.isEmpty { Text("Ask anything, or add context…").font(.system(size: 14)).foregroundStyle(.secondary.opacity(0.7)).padding(.top, 7).padding(.leading, 5).allowsHitTesting(false) }
+                    ComposerEditor(text: $state.composer, height: $composerHeight, focused: $composerFocused, onSubmit: { state.send() }).frame(height: composerHeight)
                 }
-                HStack {
-                    Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17)).frame(width: 27, height: 27) }.buttonStyle(.plain).help("Attach PDF or text")
-                    Spacer()
-                    Text("Codex").font(.system(size: 11)).foregroundStyle(.tertiary)
-                    Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
-                        Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(nsColor: .textBackgroundColor)).frame(width: 31, height: 31).background(.primary, in: Circle())
-                    }.buttonStyle(.plain).disabled(!state.isBusy && state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel(state.isBusy ? "Stop response" : "Send message")
-                }
-            }.padding(13).background(Color(nsColor: .windowBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 23)).overlay(RoundedRectangle(cornerRadius: 23).stroke(.primary.opacity(0.09)))
-            CaptureStatusCaption(audio: state.audio, active: state.activeCallID != nil, starting: state.callStarting, ending: state.callEnding)
-        }.frame(maxWidth: 760).padding(.horizontal, 30).padding(.bottom, 18).padding(.top, 10).frame(maxWidth: .infinity)
+                Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
+                    Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white).frame(width: 32, height: 32)
+                        .background(OblivionStyle.blue, in: Circle())
+                        .contentTransition(.symbolEffect(.replace))
+                }.buttonStyle(.plain).opacity(state.isBusy || !state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 1 : 0.3)
+                    .disabled(!state.isBusy && state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")
+            }.padding(10)
+                .background(OblivionStyle.raised, in: RoundedRectangle(cornerRadius: 24))
+                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(composerFocused ? 0.18 : 0.07), lineWidth: 0.7))
+                .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: composerFocused)
+            if state.activeCallID != nil { CaptureStatusCaption(audio: state.audio, active: true, starting: state.callStarting, ending: state.callEnding) }
+        }.frame(maxWidth: 760).padding(.horizontal, 30).padding(.bottom, 24).padding(.top, 12).frame(maxWidth: .infinity)
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -175,9 +197,13 @@ struct CallRow: View {
             Text(call.title).font(.system(size: 13)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             if hovering || selected {
                 Button(action: transcript) { Image(systemName: "doc.text").font(.system(size: 11)) }.buttonStyle(.plain).help("View transcript")
-                Menu { Button("Rename", action: rename); Button(call.archived ? "Restore" : "Archive", action: archive) } label: { Image(systemName: "ellipsis").font(.system(size: 12)) }.menuStyle(.borderlessButton).fixedSize().frame(width: 18)
+                Menu { Button("Rename", action: rename); Button(call.archived ? "Restore" : "Archive", action: archive) } label: { Image(systemName: "ellipsis").font(.system(size: 12)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 18)
             }
-        }.padding(.horizontal, 10).padding(.vertical, 11).background(selected ? Color.primary.opacity(0.075) : hovering ? Color.primary.opacity(0.035) : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle()).onTapGesture(perform: select).onHover { hovering = $0 }
+        }.padding(.horizontal, 10).padding(.vertical, 11)
+            .background(selected ? Color.white.opacity(0.075) : hovering ? Color.white.opacity(0.035) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.white.opacity(0.045) : .clear, lineWidth: 0.5))
+            .contentShape(Rectangle()).onTapGesture(perform: select).onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovering)
             .contextMenu { Button("View transcript", action: transcript); Button("Rename", action: rename); Button(call.archived ? "Restore" : "Archive", action: archive) }
             .accessibilityElement(children: .contain).accessibilityLabel(call.title)
     }
@@ -185,6 +211,7 @@ struct CallRow: View {
 
 struct MessageRow: View {
     var message: ChatMessage
+    var showActions = true
     var save: () -> Void
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 9) {
@@ -198,7 +225,7 @@ struct MessageRow: View {
                     }.frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
                     if message.role != "user" { Spacer(minLength: 0) }
                 }
-                if message.role == "assistant", !message.text.isEmpty {
+                if showActions, message.role == "assistant", !message.text.isEmpty {
                     HStack(spacing: 14) {
                         Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string) } label: { Image(systemName: "doc.on.doc") }.help("Copy response")
                         Button(action: save) { Label("Save answer", systemImage: "rectangle.stack.badge.plus") }
@@ -212,32 +239,60 @@ struct MessageRow: View {
 
 struct ComposerEditor: NSViewRepresentable {
     @Binding var text: String
+    @Binding var height: CGFloat
+    @Binding var focused: Bool
     var onSubmit: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true
+        let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
         let editor = SubmitTextView(); editor.isRichText = false; editor.drawsBackground = false; editor.font = .systemFont(ofSize: 14); editor.textColor = .labelColor; editor.insertionPointColor = .labelColor
-        editor.textContainerInset = NSSize(width: 0, height: 8); editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
+        editor.textContainerInset = NSSize(width: 0, height: 6); editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
+        editor.textContainer?.containerSize.height = .greatestFiniteMagnitude
         editor.delegate = context.coordinator; editor.onSubmit = onSubmit; editor.setAccessibilityLabel("Message")
+        editor.onLayout = { [weak coordinator = context.coordinator, weak editor] in if let editor { coordinator?.measure(editor) } }
+        editor.onFocus = { [weak coordinator = context.coordinator] focus in coordinator?.parent.focused = focus }
         scroll.documentView = editor
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let editor = scroll.documentView as? SubmitTextView else { return }
+        editor.appearance = NSAppearance(named: .darkAqua)
         editor.onSubmit = onSubmit
         if editor.string != text { editor.string = text }
+        context.coordinator.measure(editor)
     }
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerEditor
+        private var measurementScheduled = false
         init(_ parent: ComposerEditor) { self.parent = parent }
-        func textDidChange(_ notification: Notification) { if let view = notification.object as? NSTextView { parent.text = view.string } }
+        func textDidChange(_ notification: Notification) { if let view = notification.object as? NSTextView { parent.text = view.string; measure(view) } }
+        func measure(_ editor: NSTextView) {
+            guard !measurementScheduled else { return }
+            measurementScheduled = true
+            // Measure the laid-out text, including wrapping, outside SwiftUI's
+            // update pass. A bounded, change-only write avoids layout feedback.
+            DispatchQueue.main.async { [weak self, weak editor] in
+                guard let self else { return }
+                measurementScheduled = false
+                guard let editor, editor.bounds.width > 1, let container = editor.textContainer, let layout = editor.layoutManager else { return }
+                layout.ensureLayout(for: container)
+                let natural = ceil(layout.usedRect(for: container).height + editor.textContainerInset.height * 2)
+                let next = min(132, max(32, natural))
+                if abs(parent.height - next) > 0.5 { parent.height = next }
+            }
+        }
     }
 }
 
 final class SubmitTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    var onLayout: (() -> Void)?
+    var onFocus: ((Bool) -> Void)?
+    override func layout() { super.layout(); onLayout?() }
+    override func becomeFirstResponder() -> Bool { let accepted = super.becomeFirstResponder(); if accepted { onFocus?(true) }; return accepted }
+    override func resignFirstResponder() -> Bool { let accepted = super.resignFirstResponder(); if accepted { onFocus?(false) }; return accepted }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) && !hasMarkedText() { onSubmit?() }
         else { super.keyDown(with: event) }

@@ -6,7 +6,7 @@ Before the call, think deeply. During the call, make me glance, not read. After 
 
 ## Status
 
-The native application is implemented and undergoing final integration testing. Real Chrome audio capture → on-device transcript → Codex coaching → exact prepared-story retrieval has passed through the running app. Preparation, PDF/link research, notes, transcript editing/import/export, direct questions, and post-call summaries have been exercised with computer use. Microphone authorization, the Chrome extension installation, and multi-person meeting/receiver-side checks remain open; see [the verification log](docs/TESTING.md).
+The native application is implemented and undergoing final integration testing. Real microphone and Chrome audio capture → on-device transcript → Codex coaching, stable answers while speaking, and exact prepared-story retrieval have passed through the running app. The installed Meet companion and two-person roster attribution have also passed. Preparation, PDF/link research, notes, transcript editing/import/export, direct questions, and post-call summaries have been exercised with computer use. Actual Zoom meeting audio, larger-meeting speaker signals, headphones/device changes, and remote receiver checks remain open; see [the verification log](docs/TESTING.md).
 
 ## Run locally
 
@@ -26,6 +26,8 @@ The last command exercises your real Codex account. Calls and attachments are st
 
 Create a call and work through your preparation in the chat. Use the attachment button for PDFs/text and paste links for research. Save complete stories with **Save answer**. Your shared personal background lives in Settings.
 
+The app uses a dark-only charcoal palette with a glass sidebar. The compact composer grows with your text; Return sends and Shift-Return inserts a line break. Call notes display formatted text; choose **Edit** to change them.
+
 **Start call** captures microphone and meeting audio. The upper HUD gives one recommendation and a small coaching strip. **Chat** returns to the main window while listening continues; **End call** stops capture and saves the transcript. The sidebar document button opens transcript search/corrections/export. Notes and prepared answers open from the chat header.
 
 - `⌘⇧Space`: hide/show the HUD during a call.
@@ -36,6 +38,8 @@ Create a call and work through your preparation in the chat. Use the attachment 
 Share a specific tab/application window or use a separate display for the HUD. Full-display sharing may expose it. A local Chrome tab-capture receiver test passed; this is not a universal capture-exclusion guarantee.
 
 For Meet names, Settings → **Set up Meet companion…** installs the native host and opens the extension folder. Manually load that folder in Chrome's extensions page, open the extension in your meeting, and select **Use this meeting**. The call still works without names; uncertain speakers remain “Meeting.”
+
+The monochrome Oblivion mark is available as [light](Resources/Brand/OblivionMark.svg) and [dark](Resources/Brand/OblivionMark-Black.svg) SVGs. Its two flowing shapes form an O around a central void. `scripts/make-icon.sh` regenerates these exports and the macOS icon from the same geometry used by the native interface.
 
 ## Build priorities
 
