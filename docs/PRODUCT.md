@@ -8,6 +8,7 @@ The user's conversation and subsequent clarifications are authoritative. This do
 - Google Meet and Zoom, usually with headphones.
 - Include a companion Chrome extension for Google Meet participant names and speaking activity in the live audio phase; approved September 11, 2026.
 - A calm native Mac application using ChatGPT/Codex interaction patterns and Apple's design guidance.
+- SwiftUI for the main interface and AppKit for native window/panel behavior are confirmed. Use computer use to test the running application, including real interactions and visual inspection.
 - Working name: Oblivion.
 - No accounts, cloud sync, calendar, project spaces, or dashboard required for the first release.
 
@@ -61,7 +62,7 @@ After End call, the same chat can summarize findings, unresolved questions, sign
 
 ## Storage and presentation assumptions
 
-Default to storing chats, attachments, notes, prepared material, and transcripts locally. Local storage does not mean local inference: relevant context is sent through Codex App Server, and live audio would be sent to GPT-Live-1. Default to no retained raw audio recording; revisit only if requested. Do not claim a provider's server-side retention policy is controlled by our local storage choice.
+Default to storing chats, attachments, notes, prepared material, and transcripts locally. Local storage does not mean local inference: relevant context is sent through Codex App Server. The live audio implementation is deferred; selecting GPT-Live-1 later would send captured audio to that service. Default to no retained raw audio recording; revisit only if requested. Do not claim a provider's server-side retention policy is controlled by our local storage choice.
 
 Explain presentation safety during intake/onboarding. Keep the HUD in its own native window and support sharing a selected application/window or using an unshared display. Do not promise universal invisibility under full-display capture or infer a verified safe state from incomplete meeting-app signals.
 
