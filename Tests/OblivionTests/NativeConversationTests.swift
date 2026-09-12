@@ -52,3 +52,35 @@ import Testing
     #expect(coordinator.textView(text, clickedOnLink: URL(string: "oblivion://save/\(answer.id.uuidString)")!, at: 0))
     #expect(saved == answer.text)
 }
+
+@Test @MainActor func nativeChatUsesClickableButtonsOnlyForVisibleMessages() throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-buttons-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let library = try LibraryStore(root: root)
+    let scroll = ChatScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    let text = ChatDocumentView(frame: NSRect(x: 0, y: 0, width: 580, height: 400))
+    text.isEditable = false; text.isVerticallyResizable = true
+    text.textContainer?.widthTracksTextView = true
+    scroll.documentView = text
+    let coordinator = NativeConversationView.Coordinator(); coordinator.textView = text
+    var saved = ""
+    let messages = (0..<120).map { ChatMessage(role: "assistant", text: "Response \($0)\n\nA second paragraph of useful context.") }
+    let view = NativeConversationView(callID: UUID(), messages: messages, library: library, busy: false, status: "", save: { saved = $0 })
+    text.onAction = { url in _ = coordinator.textView(text, clickedOnLink: url, at: 0) }
+    coordinator.update(view)
+    text.layoutManager?.ensureLayout(for: text.textContainer!)
+    text.sizeToFit()
+    text.layoutActionButtons()
+    #expect(!text.actionButtons.isEmpty)
+    #expect(text.actionButtons.count < 20)
+    #expect(text.accessibilityChildren()?.contains { $0 is ChatActionButton } == true)
+    let oldURLs = Set(text.actionButtons.keys)
+    let save = try #require(text.actionButtons.first { $0.key.host == "save" })
+    save.value.performClick(nil)
+    #expect(saved == messages.first { $0.id.uuidString == save.key.lastPathComponent }?.text)
+    text.scrollRangeToVisible(NSRange(location: text.string.utf16.count, length: 0))
+    text.layoutActionButtons()
+    #expect(text.actionButtons.count < 20)
+    #expect(Set(text.actionButtons.keys).isDisjoint(with: oldURLs))
+}

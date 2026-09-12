@@ -40,6 +40,10 @@ struct NativeConversationView: NSViewRepresentable {
         scroll.documentView = text
         context.coordinator.textView = text
         context.coordinator.scrollView = scroll
+        text.onAction = { [weak coordinator = context.coordinator] url in
+            guard let coordinator, let text = coordinator.textView else { return }
+            _ = coordinator.textView(text, clickedOnLink: url, at: 0)
+        }
         text.onWidthChanged = { [weak coordinator = context.coordinator] in coordinator?.scrollIfFollowing() }
         scroll.onUserScroll = { [weak coordinator = context.coordinator] in coordinator?.following = false }
         scroll.onDidScroll = { [weak coordinator = context.coordinator] in coordinator?.updateFollowing() }
@@ -94,6 +98,7 @@ struct NativeConversationView: NSViewRepresentable {
                 return NSRange(location: offsets[index], length: max(0, end - offsets[index] - 2))
             }
             view.needsDisplay = true
+            view.scheduleActionLayout()
             scrollIfFollowing()
         }
 
@@ -129,7 +134,7 @@ struct NativeConversationView: NSViewRepresentable {
             if message.role == "assistant", index > 0, !message.text.isEmpty {
                 result.append(label("\n", size: 10))
                 result.append(action("Copy", kind: "copy", id: message.id))
-                result.append(label("    ", size: 10))
+                result.append(label("  ", size: 11))
                 result.append(action("Save for call", kind: "save", id: message.id))
                 if message.interrupted { result.append(label("    Stopped", size: 10)) }
             }
@@ -144,10 +149,15 @@ struct NativeConversationView: NSViewRepresentable {
         }
 
         private func action(_ text: String, kind: String, id: UUID) -> NSAttributedString {
-            let value = NSMutableAttributedString(attributedString: label(text, size: 10))
+            // Text reserves space; only visible actions get real native buttons.
+            let value = NSMutableAttributedString(attributedString: label("   \(text)   ", size: 11))
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = 30
+            paragraph.paragraphSpacingBefore = 8
             value.addAttributes([
-                .link: URL(string: "oblivion://\(kind)/\(id.uuidString)")!,
-                .toolTip: kind == "save" ? "Save this response as a prepared answer for the live call HUD" : "Copy the full Markdown response"
+                .oblivionAction: URL(string: "oblivion://\(kind)/\(id.uuidString)")!,
+                .foregroundColor: NSColor.clear,
+                .paragraphStyle: paragraph
             ], range: NSRange(location: 0, length: value.length))
             return value
         }
@@ -210,7 +220,11 @@ final class ChatScrollView: NSScrollView {
     private var liveObservers: [NSObjectProtocol] = []
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        contentView.postsBoundsChangedNotifications = true
         liveObservers = [
+            NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) { [weak self] _ in
+                (self?.documentView as? ChatDocumentView)?.scheduleActionLayout()
+            },
             NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: self, queue: .main) { [weak self] _ in self?.onUserScroll?() },
             NotificationCenter.default.addObserver(forName: NSScrollView.didLiveScrollNotification, object: self, queue: .main) { [weak self] _ in self?.onDidScroll?() }
         ]
@@ -220,13 +234,75 @@ final class ChatScrollView: NSScrollView {
     override func scrollWheel(with event: NSEvent) { onUserScroll?(); super.scrollWheel(with: event); onDidScroll?() }
 }
 
+extension NSAttributedString.Key {
+    static let oblivionAction = NSAttributedString.Key("OblivionMessageAction")
+}
+
 final class ChatDocumentView: NSTextView {
     var userRanges: [NSRange] = []
     var onWidthChanged: (() -> Void)?
+    var onAction: ((URL) -> Void)?
+    private(set) var actionButtons: [URL: ChatActionButton] = [:]
+    private var actionLayoutScheduled = false
+
+    func scheduleActionLayout() {
+        guard !actionLayoutScheduled else { return }
+        actionLayoutScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.actionLayoutScheduled = false
+            self.layoutActionButtons()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        layoutActionButtons()
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        // NSTextView exposes its text links, but not embedded NSButton subviews.
+        (super.accessibilityChildren() ?? []) + actionButtons.values.sorted {
+            $0.frame.minY == $1.frame.minY ? $0.frame.minX < $1.frame.minX : $0.frame.minY < $1.frame.minY
+        }
+    }
+
+    func layoutActionButtons() {
+        guard let layoutManager, let textContainer, let textStorage else { return }
+        let origin = textContainerOrigin
+        let glyphs = layoutManager.glyphRange(forBoundingRect: visibleRect.offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
+        let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        var visible = Set<URL>()
+        textStorage.enumerateAttribute(.oblivionAction, in: characters) { value, range, _ in
+            guard let url = value as? URL else { return }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: origin.x, dy: origin.y)
+            let frame = NSRect(x: rect.minX, y: rect.midY - 13, width: max(46, rect.width), height: 26)
+            guard visibleRect.intersects(frame) else { return }
+            visible.insert(url)
+            let button: ChatActionButton
+            if let existing = actionButtons[url] { button = existing }
+            else {
+                button = ChatActionButton(frame: .zero)
+                button.title = url.host == "save" ? "Save for call" : "Copy"
+                button.toolTip = url.host == "save" ? "Edit and save this response to Must-say" : "Copy the full Markdown response"
+                button.onPress = { [weak self, weak button] in
+                    self?.onAction?(url)
+                    if url.host == "copy" { button?.showCopied() }
+                }
+                actionButtons[url] = button; addSubview(button)
+            }
+            if button.frame != frame { button.frame = frame }
+        }
+        for url in Array(actionButtons.keys) where !visible.contains(url) {
+            actionButtons.removeValue(forKey: url)?.removeFromSuperview()
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         let changed = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
-        if changed { onWidthChanged?() }
+        if changed { onWidthChanged?(); scheduleActionLayout() }
     }
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
@@ -239,6 +315,52 @@ final class ChatDocumentView: NSTextView {
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: origin.x, dy: origin.y)
             NSBezierPath(roundedRect: bounds.insetBy(dx: -12, dy: -9), xRadius: 18, yRadius: 18).fill()
+        }
+    }
+}
+
+/// A small neutral pill with native button semantics, cursor and press feedback.
+/// Instances are recycled offscreen, rather than retained for the whole history.
+final class ChatActionButton: NSButton {
+    var onPress: (() -> Void)?
+    private var hovering = false
+    private var tracking: NSTrackingArea?
+    private var feedbackID = UUID()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        font = .systemFont(ofSize: 11, weight: .medium)
+        target = self; action = #selector(pressed)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func pressed() { onPress?() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+    }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        NSColor(white: 1, alpha: isHighlighted ? 0.18 : hovering ? 0.11 : 0.045).setFill(); path.fill()
+        NSColor(white: 1, alpha: hovering ? 0.17 : 0.08).setStroke(); path.lineWidth = 1; path.stroke()
+        let label = NSAttributedString(string: title, attributes: [.font: font ?? .systemFont(ofSize: 11), .foregroundColor: hovering ? NSColor.labelColor : NSColor.secondaryLabelColor])
+        let size = label.size()
+        label.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+    func showCopied() {
+        let token = UUID(); feedbackID = token
+        title = "Copied"; needsDisplay = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.feedbackID == token else { return }
+            self.title = "Copy"; self.needsDisplay = true
         }
     }
 }

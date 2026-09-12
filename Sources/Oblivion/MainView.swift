@@ -22,7 +22,7 @@ struct MainView: View {
                         if let call = state.selected {
                             ConversationView(callID: call.id, messages: call.messages, library: state.library,
                                              busy: state.isBusy, status: state.chatStatus,
-                                             save: { state.editingStory = PreparedStory(title: "Prepared answer", body: $0) })
+                                             save: { state.editingStory = PreparedStory(title: "", body: $0) })
                                 .equatable().id(call.id)
                         } else { welcome }
                         composer
@@ -81,7 +81,7 @@ struct MainView: View {
             if state.selected != nil {
                 HStack(spacing: 2) {
                     Button { state.detail = state.detail == .notes ? nil : .notes } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.help("Notes")
-                    Button { state.detail = state.detail == .stories ? nil : .stories } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Prepared answers")
+                    Button { state.detail = state.detail == .stories ? nil : .stories } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Must-say").accessibilityLabel("Must-say")
                 }.buttonStyle(QuietButtonStyle())
                 if state.activeCallID != nil { Button("End call") { Task { await state.endCall() } }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(state.callEnding) }
                 Button { if state.activeCallID != nil { state.windows.showHUD() } else { state.showCallSetup = true } } label: {

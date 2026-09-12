@@ -120,8 +120,8 @@ struct HUDView: View {
                 Menu {
                     Button(state.recommendationPinned ? "Unpin answer" : "Pin this answer") { state.recommendationPinned.toggle() }
                     Divider()
-                    ForEach(state.activeCall?.stories.filter(\.approved) ?? []) { story in Button(story.title) { state.useStory(story) } }
-                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "rectangle.stack") }.menuStyle(.borderlessButton).fixedSize().help("Prepared answers · available offline")
+                    ForEach(state.activeCall?.stories.filter(\.approved) ?? []) { story in Button(story.displayTitle) { state.useStory(story) } }
+                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "rectangle.stack") }.menuStyle(.borderlessButton).fixedSize().help("Must-say · available offline")
                 Spacer()
                 AudioLevelsView(audio: state.audio)
                 Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)

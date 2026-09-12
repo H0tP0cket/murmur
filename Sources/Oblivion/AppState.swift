@@ -63,8 +63,8 @@ final class AppState: ObservableObject {
     private var activeSession: UUID?
     private var lastCoach = Date.distantPast
     private var lastSave = Date.distantPast
-    private var autosaveTask: Task<Void, Never>?
-    enum Detail: String, CaseIterable { case notes = "Notes", transcript = "Transcript", stories = "Prepared answers" }
+    private var noteSaveTasks: [UUID: Task<Void, Never>] = [:]
+    enum Detail: String, CaseIterable { case notes = "Notes", transcript = "Transcript", stories = "Must-say" }
 
     init(root: URL? = nil, connect: Bool = true) {
         do { library = try LibraryStore(root: root) }
@@ -126,6 +126,25 @@ final class AppState: ObservableObject {
     func persist(_ id: UUID) {
         guard let call = calls.first(where: { $0.id == id }) else { return }
         do { try library.save(call); lastSave = Date() } catch { self.error = "Couldn’t save this call. \(error.localizedDescription)" }
+    }
+
+    func editNotes(callID: UUID, text: String, generated: Bool = false) {
+        // Context is current immediately; coalesce the full library export while typing.
+        modify(callID, { call in
+            if generated { call.generatedNotes = text; call.generatedNotesEdited = true }
+            else { call.notes = text }
+        }, save: false)
+        noteSaveTasks[callID]?.cancel()
+        noteSaveTasks[callID] = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            self?.persist(callID); self?.noteSaveTasks[callID] = nil
+        }
+    }
+
+    func flushNoteEdits() {
+        let pending = Array(noteSaveTasks.keys)
+        noteSaveTasks.values.forEach { $0.cancel() }; noteSaveTasks.removeAll()
+        pending.forEach { persist($0) }
     }
 
     func editTranscript(callID: UUID, segmentID: UUID, text: String, speaker: String) {
@@ -326,7 +345,7 @@ final class AppState: ObservableObject {
 
     func useStory(_ story: PreparedStory) {
         pendingRecommendation = nil; recommendationPinned = true
-        recommendation = Recommendation(kind: "ANSWER", coaching: "Your prepared answer. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
+        recommendation = Recommendation(kind: "MUST-SAY", coaching: "Your exact wording. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
     }
 
     func startCall(popOut: Bool = true) async {
@@ -433,8 +452,7 @@ final class AppState: ObservableObject {
                 let result = try await codex.run(threadID: thread, text: text, images: isFreshThread ? library.imageURLs(for: call) : [], live: true, schema: Recommendation.schema)
                 guard activeCallID == callID, activeSession == sessionID, !callEnding, !Task.isCancelled, transcriptEditGeneration == editGeneration else { return }
                 let cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
-                var next = try JSONDecoder().decode(Recommendation.self, from: Data(cleaned.utf8))
-                if let storyID = next.storyID, let story = activeCall?.stories.first(where: { $0.id.uuidString.lowercased() == storyID.lowercased() && $0.approved }) { next.answer = story.body }
+                var next = try JSONDecoder().decode(Recommendation.self, from: Data(cleaned.utf8)).resolvingMustSay(from: activeCall?.stories ?? [])
                 if next.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     next.answer = next.kind == "LISTEN" ? "Let them finish their thought." : recommendation.answer
                 }

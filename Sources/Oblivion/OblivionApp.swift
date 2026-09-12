@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        state?.flushNoteEdits()
         guard let state, state.activeCallID != nil else { state?.codex.disconnect(); return .terminateNow }
         Task { await state.endCall(summarize: false); state.codex.disconnect(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
