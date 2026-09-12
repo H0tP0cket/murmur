@@ -60,3 +60,27 @@ private struct SidebarGlass: NSViewRepresentable {
     }
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
+
+/// Fade only the backdrop; recommendations and controls remain fully opaque.
+struct HUDSurface: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        Group {
+            if reduceTransparency { OblivionStyle.canvas }
+            else { HUDGlass().overlay(OblivionStyle.canvas.opacity(0.14)) }
+        }.allowsHitTesting(false)
+    }
+}
+
+private struct HUDGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        view.alphaValue = 0.65
+        return view
+    }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}

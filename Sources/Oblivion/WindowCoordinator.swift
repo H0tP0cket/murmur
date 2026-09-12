@@ -19,7 +19,8 @@ final class WindowCoordinator {
             panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.isMovableByWindowBackground = true; panel.minSize = NSSize(width: 460, height: 230)
-            panel.isReleasedWhenClosed = false; panel.backgroundColor = OblivionStyle.windowColor
+            panel.isReleasedWhenClosed = false
+            panel.isOpaque = false; panel.backgroundColor = .clear
             panel.appearance = NSAppearance(named: .darkAqua)
             panel.standardWindowButton(.closeButton)?.isHidden = true
             panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -127,7 +128,9 @@ struct HUDView: View {
                 Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)
             }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 13)
         }
-        .background(OblivionStyle.canvas)
+        .background(HUDSurface())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.13), lineWidth: 0.7).allowsHitTesting(false))
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .tint(OblivionStyle.accent)
