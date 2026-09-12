@@ -25,7 +25,7 @@ struct NativeConversationView: NSViewRepresentable {
         text.isSelectable = true
         text.isRichText = true
         text.drawsBackground = false
-        text.textContainerInset = NSSize(width: 35, height: 22)
+        text.textContainerInset = NSSize(width: 28, height: 18)
         text.isVerticallyResizable = true
         text.isHorizontallyResizable = false
         text.autoresizingMask = [.width]
@@ -119,12 +119,10 @@ struct NativeConversationView: NSViewRepresentable {
             }
             if message.role == "user" {
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.lineSpacing = 6
-                paragraph.firstLineHeadIndent = 50
-                paragraph.headIndent = 50
-                paragraph.tailIndent = -12
-                paragraph.paragraphSpacingBefore = 12
-                paragraph.paragraphSpacing = 12
+                paragraph.lineSpacing = 4
+                paragraph.firstLineHeadIndent = 14
+                paragraph.headIndent = 14
+                paragraph.tailIndent = -14
                 result.append(NSAttributedString(string: message.text, attributes: [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]))
             } else if message.role == "system" {
                 result.append(label(message.text, size: 12))
@@ -273,6 +271,7 @@ final class ChatDocumentView: NSTextView {
         let glyphs = layoutManager.glyphRange(forBoundingRect: visibleRect.offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         var visible = Set<URL>()
+        var geometryChanged = false
         textStorage.enumerateAttribute(.oblivionAction, in: characters) { value, range, _ in
             guard let url = value as? URL else { return }
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -290,13 +289,26 @@ final class ChatDocumentView: NSTextView {
                     self?.onAction?(url)
                     if url.host == "copy" { button?.showCopied() }
                 }
-                actionButtons[url] = button; addSubview(button)
+                actionButtons[url] = button; addSubview(button); geometryChanged = true
             }
-            if button.frame != frame { button.frame = frame }
+            if button.frame != frame { button.frame = frame; geometryChanged = true }
         }
         for url in Array(actionButtons.keys) where !visible.contains(url) {
             actionButtons.removeValue(forKey: url)?.removeFromSuperview()
+            geometryChanged = true
         }
+        if geometryChanged { window?.invalidateCursorRects(for: self) }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for button in actionButtons.values { addCursorRect(button.frame, cursor: .pointingHand) }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if actionButtons.values.contains(where: { $0.frame.contains(point) }) { NSCursor.pointingHand.set() }
+        else { super.cursorUpdate(with: event) }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -314,7 +326,10 @@ final class ChatDocumentView: NSTextView {
         for range in userRanges where NSIntersectionRange(range, visibleCharacters).length > 0 {
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: origin.x, dy: origin.y)
-            NSBezierPath(roundedRect: bounds.insetBy(dx: -12, dy: -9), xRadius: 18, yRadius: 18).fill()
+            // TextKit's bounds include paragraph indentation. Drawing another
+            // horizontal inset around that double-counted the user's left padding.
+            let bubble = NSRect(x: origin.x, y: bounds.minY - 10, width: textContainer.size.width, height: bounds.height + 20)
+            NSBezierPath(roundedRect: bubble, xRadius: 16, yRadius: 16).fill()
         }
     }
 }
@@ -341,11 +356,12 @@ final class ChatActionButton: NSButton {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(area); tracking = area
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
-    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+    override func mouseEntered(with event: NSEvent) { hovering = true; NSCursor.pointingHand.set(); needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)

@@ -16,7 +16,7 @@ struct MarkdownBody: View, Equatable {
     var body: some View {
         Text(AttributedString(Self.render(text, fontSize: fontSize)))
             .font(.system(size: fontSize))
-            .lineSpacing(fontSize > 13 ? 6 : 4)
+            .lineSpacing(4)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -28,14 +28,19 @@ struct MarkdownBody: View, Equatable {
         let result = NSMutableAttributedString(string: "")
         for (index, block) in blocks(text).enumerated() {
             let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = fontSize > 13 ? 6 : 4
+            paragraph.lineSpacing = 4
             paragraph.lineBreakMode = .byWordWrapping
             if block.kind == .quote { paragraph.headIndent = 12; paragraph.firstLineHeadIndent = 12 }
             let size = block.kind == .heading ? (block.level == 1 ? fontSize + 5 : fontSize + 1) : block.kind == .code ? fontSize - 2 : fontSize
             let base = block.kind == .code ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : NSFont.systemFont(ofSize: size, weight: block.kind == .heading ? .semibold : .regular)
             let color = block.kind == .quote ? NSColor.secondaryLabelColor : NSColor.labelColor
             let attributes: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: color, .paragraphStyle: paragraph]
-            if index > 0 { result.append(NSAttributedString(string: "\n\n", attributes: attributes)) }
+            if index > 0 {
+                // Keep selectable paragraph breaks without a full extra text row
+                // of vertical padding between every pair of paragraphs.
+                let separator = NSMutableParagraphStyle()
+                result.append(NSAttributedString(string: "\n\n", attributes: [.font: NSFont.systemFont(ofSize: fontSize * 0.5), .paragraphStyle: separator]))
+            }
             if block.kind == .code {
                 var codeAttributes = attributes
                 codeAttributes[.backgroundColor] = NSColor(white: 0.5, alpha: 0.1)

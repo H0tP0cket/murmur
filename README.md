@@ -6,7 +6,7 @@ A native macOS copilot for better conversations. Prepare in a chat, get live coa
 
 - Free-form preparation with images, PDFs, text, links, and research.
 - Automatic person + company/role chat names, with manual renaming.
-- A floating HUD with one next recommendation, full prepared answers, and quick private questions.
+- A floating HUD with one next recommendation, exact Must-say wording, and quick private questions.
 - On-device transcription of microphone and meeting audio.
 - Searchable, editable transcripts and notes attached to each conversation.
 - SwiftUI + AppKit, a monochrome dark interface, and a glass sidebar.
@@ -24,7 +24,11 @@ open ~/Applications/Oblivion.app
 
 Quit Oblivion before reinstalling. Run `scripts/test.sh` for tests.
 
-Use **+** to attach files, or paste screenshots and copied image files into the composer. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; its Copy action copies the full Markdown response. **Save for call** opens the prepared-answer editor so you can approve wording for the live HUD.
+Use **+** to attach files, or paste screenshots and copied image files into the composer. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
+
+**Save for call** opens **Must-say** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing prepared answers remain available. This is priority context, not a separate model cache or a guarantee of perfect matching.
+
+**Notes** opens a full-height personal notepad. Your notes are saved with the call and included when you ask the chat to reference them. The **AI notes** tab keeps generated findings, edits, and updates separate.
 
 Chats, attachments, and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text and attached images are sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
 
