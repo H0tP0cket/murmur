@@ -62,8 +62,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Configure each native window once, rather than resetting its appearance
+/// and invalidating layout on every published chat/composer update.
 struct WindowReader: NSViewRepresentable {
     var onWindow: (NSWindow) -> Void
-    func makeNSView(context: Context) -> NSView { let view = NSView(); DispatchQueue.main.async { if let window = view.window { onWindow(window) } }; return view }
-    func updateNSView(_ view: NSView, context: Context) { DispatchQueue.main.async { if let window = view.window { onWindow(window) } } }
+    func makeNSView(context: Context) -> WindowAttachmentView {
+        let view = WindowAttachmentView()
+        view.onWindow = onWindow
+        return view
+    }
+    func updateNSView(_ view: WindowAttachmentView, context: Context) { view.onWindow = onWindow }
+}
+
+final class WindowAttachmentView: NSView {
+    var onWindow: ((NSWindow) -> Void)?
+    private weak var configuredWindow: NSWindow?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window, window !== configuredWindow else { return }
+        configuredWindow = window
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            self.onWindow?(window)
+        }
+    }
 }

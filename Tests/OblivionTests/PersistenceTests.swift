@@ -137,7 +137,7 @@ import Testing
     #expect(disconnectedDuringReply)
     #expect(!service.isConnected)
     try await service.connect()
-    let fresh = try await service.thread(cwd: root, live: true)
+    let fresh = try await service.thread(cwd: root, live: true, instructions: "This is a connection recovery test. Return the exact text requested by the user, as plain text without JSON or formatting.")
     let recovered = try await service.run(threadID: fresh, text: "Reply with exactly reconnected and nothing else.", live: true)
     let recoveredText = (try? JSONDecoder().decode(String.self, from: Data(recovered.utf8))) ?? recovered.trimmingCharacters(in: .whitespacesAndNewlines)
     #expect(recoveredText == "reconnected")

@@ -1,54 +1,30 @@
 import SwiftUI
 import AppKit
 
-/// One native text surface per response: selection spans headings, paragraphs,
-/// lists, and code, while retaining link handling and inline formatting.
-struct MarkdownBody: NSViewRepresentable {
+/// A single selectable text surface lets selections cross Markdown blocks.
+/// SwiftUI owns wrapping and height, including after sidebar/window resizing.
+struct MarkdownBody: View, Equatable {
     let text: String
     var fontSize: CGFloat = 15
+    private static let renderedCache: NSCache<NSString, NSAttributedString> = {
+        let cache = NSCache<NSString, NSAttributedString>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 8 * 1024 * 1024
+        return cache
+    }()
 
-    func makeNSView(context: Context) -> ResponseTextView {
-        let view = ResponseTextView()
-        view.isEditable = false; view.isSelectable = true; view.drawsBackground = false
-        view.isRichText = true; view.importsGraphics = false
-        view.textContainerInset = .zero
-        view.textContainer?.lineFragmentPadding = 0
-        view.textContainer?.widthTracksTextView = true
-        view.textContainer?.containerSize.height = .greatestFiniteMagnitude
-        view.isHorizontallyResizable = false; view.isVerticallyResizable = false
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        view.linkTextAttributes = [.foregroundColor: NSColor.labelColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
-        view.selectedTextAttributes = [.backgroundColor: NSColor(white: 0.4, alpha: 0.65), .foregroundColor: NSColor.white]
-        return view
-    }
-
-    func updateNSView(_ view: ResponseTextView, context: Context) {
-        view.appearance = NSAppearance(named: .darkAqua)
-        guard view.renderedText != text || view.renderedFontSize != fontSize else { return }
-        let ranges = view.selectedRanges
-        view.textStorage?.setAttributedString(Self.render(text, fontSize: fontSize))
-        let length = view.textStorage?.length ?? 0
-        view.selectedRanges = ranges.map { value in
-            let range = value.rangeValue, start = min(range.location, length)
-            return NSValue(range: NSRange(location: start, length: min(range.length, length - start)))
-        }
-        view.renderedText = text; view.renderedFontSize = fontSize
-        view.invalidateIntrinsicContentSize()
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ResponseTextView, context: Context) -> CGSize? {
-        guard let width = proposal.width, width > 0, let attributed = nsView.textStorage else { return nil }
-        // SwiftUI probes several widths. Measuring in the displayed text view
-        // can leave its container at a rejected width and overlap the controls.
-        let storage = NSTextStorage(attributedString: attributed)
-        let layout = NSLayoutManager(), container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        storage.addLayoutManager(layout); layout.addTextContainer(container)
-        layout.ensureLayout(for: container)
-        return CGSize(width: width, height: max(1, ceil(layout.usedRect(for: container).height)))
+    var body: some View {
+        Text(AttributedString(Self.render(text, fontSize: fontSize)))
+            .font(.system(size: fontSize))
+            .lineSpacing(fontSize > 13 ? 6 : 4)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     static func render(_ text: String, fontSize: CGFloat) -> NSAttributedString {
+        let key = "\(fontSize):\(text)" as NSString
+        if let cached = renderedCache.object(forKey: key) { return cached }
         let result = NSMutableAttributedString(string: "")
         for (index, block) in blocks(text).enumerated() {
             let paragraph = NSMutableParagraphStyle()
@@ -78,7 +54,9 @@ struct MarkdownBody: NSViewRepresentable {
                 }
             } else { result.append(NSAttributedString(string: block.text, attributes: attributes)) }
         }
-        return result
+        let immutable = NSAttributedString(attributedString: result)
+        renderedCache.setObject(immutable, forKey: key, cost: max(1, text.utf16.count * 8))
+        return immutable
     }
 
     private enum Kind { case text, heading, code, quote }
@@ -107,9 +85,4 @@ struct MarkdownBody: NSViewRepresentable {
         if !code.isEmpty { result.append(Block(kind: .code, text: code.joined(separator: "\n"))) }
         return result
     }
-}
-
-final class ResponseTextView: NSTextView {
-    var renderedText: String?
-    var renderedFontSize: CGFloat = 0
 }

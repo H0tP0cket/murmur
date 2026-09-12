@@ -8,7 +8,6 @@ struct MainView: View {
     @State private var sidebarVisible = true
     @State private var renameID: UUID?
     @State private var renameText = ""
-    @State private var followChat = true
     @State private var composerHeight: CGFloat = 32
     @State private var composerFocused = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -20,7 +19,12 @@ struct MainView: View {
                 if let message = state.error { errorBanner(message) }
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
-                        if let call = state.selected { conversation(call) } else { welcome }
+                        if let call = state.selected {
+                            ConversationView(callID: call.id, messages: call.messages, library: state.library,
+                                             busy: state.isBusy, status: state.chatStatus,
+                                             save: { state.editingStory = PreparedStory(title: "Prepared answer", body: $0) })
+                                .equatable().id(call.id)
+                        } else { welcome }
                         composer
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,7 +39,7 @@ struct MainView: View {
         .sheet(item: $state.editingStory) { story in StoryEditor(story: story).environmentObject(state) }
         .alert("Rename call", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
             TextField("Call name", text: $renameText)
-            Button("Save") { if let id = renameID { state.modify(id) { $0.title = renameText.isEmpty ? "Untitled call" : renameText } }; renameID = nil }
+            Button("Save") { if let id = renameID { state.renameCall(id, title: renameText) }; renameID = nil }
             Button("Cancel", role: .cancel) { renameID = nil }
         }
     }
@@ -71,13 +75,13 @@ struct MainView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { sidebarVisible.toggle() } } label: { Image(systemName: "sidebar.left") }.buttonStyle(.plain).foregroundStyle(.secondary).help("Toggle sidebar")
+            Button { sidebarVisible.toggle() } label: { Image(systemName: "sidebar.left") }.buttonStyle(.plain).foregroundStyle(.secondary).help("Toggle sidebar")
             Text(state.selected?.title ?? "Oblivion").font(.system(size: 14, weight: .medium)).lineLimit(1)
             Spacer(minLength: 8)
             if state.selected != nil {
                 HStack(spacing: 2) {
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { state.detail = state.detail == .notes ? nil : .notes } } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.help("Notes")
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { state.detail = state.detail == .stories ? nil : .stories } } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Prepared answers")
+                    Button { state.detail = state.detail == .notes ? nil : .notes } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.help("Notes")
+                    Button { state.detail = state.detail == .stories ? nil : .stories } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Prepared answers")
                 }.buttonStyle(QuietButtonStyle())
                 if state.activeCallID != nil { Button("End call") { Task { await state.endCall() } }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(state.callEnding) }
                 Button { if state.activeCallID != nil { state.windows.showHUD() } else { state.showCallSetup = true } } label: {
@@ -107,32 +111,6 @@ struct MainView: View {
         Button { state.newCall(); state.composer = title == "Prepare for an interview" ? "I’m preparing for an interview. " : "I’m planning a discovery call. " } label: {
             Label(title, systemImage: icon).font(.system(size: 12)).padding(.horizontal, 13).padding(.vertical, 11).overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.12)))
         }.buttonStyle(.plain)
-    }
-
-    private func conversation(_ call: CallRecord) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    if call.messages.count == 1, call.messages.first?.role == "assistant" {
-                        VStack(alignment: .leading, spacing: 18) {
-                            OblivionMark(size: 48)
-                            Text("Let’s get you ready.").font(.system(size: 30, weight: .semibold)).tracking(-0.8)
-                        }.padding(.top, 60).padding(.bottom, 2)
-                    }
-                    ForEach(call.messages) { message in MessageRow(message: message, callID: call.id, showActions: call.messages.count > 1, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
-                    if state.isBusy { HStack(spacing: 8) { Image(systemName: "sparkle").foregroundStyle(.secondary).symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
-                    Color.clear.frame(height: 1).id("bottom")
-                }.frame(maxWidth: 760).padding(.horizontal, 35).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: .infinity)
-            }
-            .onScrollPhaseChange { _, phase in if phase == .interacting { followChat = false } }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 25
-            } action: { _, atBottom in if atBottom { followChat = true } }
-            .onChange(of: call.messages.count) { _, _ in followChat = true; proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: call.messages.last?.text) { _, _ in if followChat { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .id(call.id)
-        }
     }
 
     private var composer: some View {
@@ -178,6 +156,26 @@ struct MainView: View {
     }
 }
 
+/// Changes to notes, audio levels, the composer, or window controls must not
+/// rebuild the conversation. Only changed messages reach the native document.
+private struct ConversationView: View, Equatable {
+    var callID: UUID
+    var messages: [ChatMessage]
+    var library: LibraryStore
+    var busy: Bool
+    var status: String
+    var save: (String) -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.callID == rhs.callID && lhs.messages == rhs.messages && lhs.library === rhs.library
+            && lhs.busy == rhs.busy && lhs.status == rhs.status
+    }
+    var body: some View {
+        NativeConversationView(callID: callID, messages: messages, library: library,
+                               busy: busy, status: status, save: save)
+            .frame(maxWidth: 830).frame(maxWidth: .infinity)
+    }
+}
+
 private struct CaptureStatusCaption: View {
     @ObservedObject var audio: AudioCapture
     var active: Bool
@@ -216,43 +214,6 @@ struct CallRow: View {
     }
 }
 
-struct MessageRow: View {
-    @EnvironmentObject private var state: AppState
-    var message: ChatMessage
-    var callID: UUID
-    var showActions = true
-    var save: () -> Void
-    var body: some View {
-        VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 9) {
-            if message.role == "system" { Label(message.text, systemImage: "checkmark.circle").font(.system(size: 12)).foregroundStyle(.secondary) }
-            else {
-                if let images = message.images, !images.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack { ForEach(images) { attachment in
-                            ImageAttachmentView(url: state.library.imageURL(attachment, callID: callID), name: attachment.name, size: 112)
-                        } }
-                    }.frame(height: 116)
-                }
-                HStack(alignment: .top) {
-                    if message.role == "user" { Spacer(minLength: 50) }
-                    Group {
-                        if message.role == "user" { Text(message.text).font(.system(size: 15)).lineSpacing(6).textSelection(.enabled).padding(15).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 20)) }
-                        else { MarkdownBody(text: message.text.isEmpty ? " " : message.text) }
-                    }.frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
-                    if message.role != "user" { Spacer(minLength: 0) }
-                }
-                if showActions, message.role == "assistant", !message.text.isEmpty {
-                    HStack(spacing: 14) {
-                        Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string) } label: { Image(systemName: "doc.on.doc") }.help("Copy response")
-                        Button(action: save) { Label("Save answer", systemImage: "rectangle.stack.badge.plus") }
-                        if message.interrupted { Text("Stopped").foregroundStyle(.tertiary) }
-                    }.buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 struct ComposerEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
@@ -263,21 +224,20 @@ struct ComposerEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
-        let editor = SubmitTextView(); editor.isRichText = false; editor.drawsBackground = false; editor.font = .systemFont(ofSize: 14); editor.textColor = .labelColor; editor.insertionPointColor = .labelColor
+        let editor = SubmitTextView(); editor.appearance = NSAppearance(named: .darkAqua); editor.isRichText = false; editor.drawsBackground = false; editor.font = .systemFont(ofSize: 14); editor.textColor = .labelColor; editor.insertionPointColor = .labelColor
         editor.textContainerInset = NSSize(width: 0, height: 6); editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.containerSize.height = .greatestFiniteMagnitude
         editor.delegate = context.coordinator; editor.onSubmit = onSubmit; editor.setAccessibilityLabel("Message")
         editor.onImage = onImage; editor.onFiles = onFiles
         editor.onLayout = { [weak coordinator = context.coordinator, weak editor] in if let editor { coordinator?.measure(editor) } }
-        editor.onFocus = { [weak coordinator = context.coordinator] focus in coordinator?.parent.focused = focus }
+        editor.onFocus = { [weak coordinator = context.coordinator] focus in if coordinator?.parent.focused != focus { coordinator?.parent.focused = focus } }
         scroll.documentView = editor
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let editor = scroll.documentView as? SubmitTextView else { return }
-        editor.appearance = NSAppearance(named: .darkAqua)
         editor.onSubmit = onSubmit
         editor.onImage = onImage; editor.onFiles = onFiles
         if editor.string != text { editor.string = text }
@@ -286,6 +246,8 @@ struct ComposerEditor: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerEditor
         private var measurementScheduled = false
+        private var measuredWidth: CGFloat = -1
+        private var measuredText = ""
         init(_ parent: ComposerEditor) { self.parent = parent }
         func textDidChange(_ notification: Notification) { if let view = notification.object as? NSTextView { parent.text = view.string; measure(view) } }
         func measure(_ editor: NSTextView) {
@@ -297,6 +259,9 @@ struct ComposerEditor: NSViewRepresentable {
                 guard let self else { return }
                 measurementScheduled = false
                 guard let editor, editor.bounds.width > 1, let container = editor.textContainer, let layout = editor.layoutManager else { return }
+                let width = container.containerSize.width
+                guard width != measuredWidth || editor.string != measuredText else { return }
+                measuredWidth = width; measuredText = editor.string
                 layout.ensureLayout(for: container)
                 let natural = ceil(layout.usedRect(for: container).height + editor.textContainerInset.height * 2)
                 let next = min(132, max(32, natural))
@@ -342,6 +307,7 @@ private struct ImageAttachmentView: View {
     var size: CGFloat
     @State private var thumbnail: NSImage?
     @State private var preview = false
+    @State private var previewImage: NSImage?
     var body: some View {
         Button { preview = true } label: {
             Group {
@@ -353,17 +319,33 @@ private struct ImageAttachmentView: View {
         }.buttonStyle(.plain).accessibilityLabel("Preview \(name)").help(name)
             .task(id: url) {
                 thumbnail = nil
-                if let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 600] as CFDictionary) {
-                    thumbnail = NSImage(cgImage: image, size: .zero)
-                }
+                guard let url else { return }
+                let pixels = Int(size * 2)
+                let image = await Task.detached(priority: .utility) { Self.decode(url, pixels: pixels) }.value
+                guard !Task.isCancelled else { return }
+                thumbnail = image.map { NSImage(cgImage: $0, size: .zero) }
             }
             .popover(isPresented: $preview) {
                 VStack(spacing: 14) {
                     HStack { Text(name).font(.headline).lineLimit(1); Spacer(); Button("Done") { preview = false } }
-                    if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().frame(maxWidth: 520, maxHeight: 420) }
+                    if let image = previewImage ?? thumbnail { Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: 520, maxHeight: 420) }
                     if let url { Button("Open full image") { NSWorkspace.shared.open(url) } }
                 }.padding(18).frame(width: 556).preferredColorScheme(.dark).tint(OblivionStyle.accent)
+                    .task(id: url) {
+                        guard let url else { return }
+                        let image = await Task.detached(priority: .utility) { Self.decode(url, pixels: 1040) }.value
+                        guard !Task.isCancelled else { return }
+                        previewImage = image.map { NSImage(cgImage: $0, size: .zero) }
+                    }
+                    .onDisappear { previewImage = nil }
             }
+    }
+    nonisolated private static func decode(_ url: URL, pixels: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: pixels
+        ] as CFDictionary)
     }
 }

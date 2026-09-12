@@ -42,7 +42,7 @@ struct DetailView: View {
                 }
                 if call.generatedNotes.isEmpty { Text("Findings, open questions, and follow-ups will live here. Your own notes above stay yours.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4) }
                 else if editingNotes { TextEditor(text: Binding(get: { state.selected?.generatedNotes ?? "" }, set: { value in state.modify(call.id) { $0.generatedNotes = value; $0.generatedNotesEdited = true } })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320).accessibilityLabel("Edit call notes") }
-                else { MarkdownBody(text: call.generatedNotes, fontSize: 13) }
+                else { MarkdownBody(text: call.generatedNotes, fontSize: 13).equatable() }
                 if let suggestion = call.suggestedNotes {
                     DisclosureGroup("Updated notes ready") {
                         Text(suggestion).font(.system(size: 12)).textSelection(.enabled).padding(.vertical, 8)

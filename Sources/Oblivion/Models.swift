@@ -72,6 +72,8 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var transcript: [TranscriptSegment] = []
     var sessions: [CallSession] = []
     var intro = ""
+    // Missing on older records: preserve their existing (possibly manual) name.
+    var automaticTitlePending: Bool?
 
     var unsentImages: [Attachment] {
         let sent = Set(messages.flatMap { $0.images ?? [] }.map(\.id))
@@ -88,6 +90,22 @@ struct CallRecord: Codable, Identifiable, Equatable {
         let sources = attachments.map { "SOURCE \($0.name) \($0.sourceURL ?? "")\nFILE: \($0.imageRelativePath ?? $0.relativePath)\n\($0.text.prefix(10000))" }.joined(separator: "\n\n")
         return "CALL: \(title)\n\nPREPARATION CHAT:\n\(chatContext)\n\nAPPROVED STORIES:\n\(approved)\n\nSOURCES:\n\(sources.prefix(30000))\n\nUSER NOTES:\n\(notes)\n\nCALL NOTES SO FAR:\n\(generatedNotes)"
     }
+}
+
+struct CallTitleSuggestion: Codable {
+    var person: String?
+    var companyOrRole: String?
+    var title: String? {
+        func clean(_ value: String?) -> String { String((value ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(80)) }
+        let name = clean(person), context = clean(companyOrRole)
+        guard !name.isEmpty else { return nil }
+        return context.isEmpty ? name : "\(name) · \(context)"
+    }
+    static let schema: [String: Any] = [
+        "type": "object", "additionalProperties": false,
+        "properties": ["person": ["type": ["string", "null"]], "companyOrRole": ["type": ["string", "null"]]],
+        "required": ["person", "companyOrRole"]
+    ]
 }
 
 struct Recommendation: Codable, Equatable {

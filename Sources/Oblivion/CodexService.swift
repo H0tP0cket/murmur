@@ -11,6 +11,7 @@ final class CodexService: ObservableObject {
     private var sequence = 0
     private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
     private var turns: [String: TurnWaiter] = [:]
+    private var requestTimeouts: [Int: Task<Void, Never>] = [:]
     private var connectTask: Task<Void, Error>?
 
     private final class TurnWaiter {
@@ -20,6 +21,7 @@ final class CodexService: ObservableObject {
         var turnID: String?
         var cancelled = false
         var queuedEvents: [(String, [String: Any])] = []
+        var timeout: Task<Void, Never>?
         var onText: (String) -> Void
         var onStatus: (String) -> Void
         init(_ continuation: CheckedContinuation<String, Error>, onText: @escaping (String) -> Void, onStatus: @escaping (String) -> Void) {
@@ -87,7 +89,7 @@ final class CodexService: ObservableObject {
         return preferences.first(where: { name in models.contains { $0.id == name } }) ?? models.first?.id
     }
 
-    func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false) async throws -> String {
+    func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false, instructions: String? = nil) async throws -> String {
         try await connect()
         try Task.checkCancellation()
         if let existing {
@@ -95,7 +97,7 @@ final class CodexService: ObservableObject {
             try Task.checkCancellation()
             return existing
         }
-        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": live ? Prompts.coach : Prompts.assistant, "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
+        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": instructions ?? (live ? Prompts.coach : Prompts.assistant), "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
         if let model = model(live: live) { params["model"] = model }
         let result = try await request("thread/start", params)
         guard let id = (result["thread"] as? [String: Any])?["id"] as? String else { throw OblivionError.message("Codex didn’t return a conversation.") }
@@ -138,11 +140,12 @@ final class CodexService: ObservableObject {
                         if waiter.cancelled { await cancel(threadID: threadID) }
                     } catch { if turns[threadID] === waiter { finish(threadID, .failure(error)) } }
                 }
-                Task {
-                    try? await Task.sleep(for: .seconds(live ? 60 : 240))
-                    if turns[threadID] === waiter {
-                        await cancel(threadID: threadID)
-                        if turns[threadID] === waiter { finish(threadID, .failure(OblivionError.message("Codex took too long. Your context is saved; try again."))) }
+                waiter.timeout = Task { [weak self, weak waiter] in
+                    do { try await Task.sleep(for: .seconds(live ? 60 : 240)) } catch { return }
+                    guard let self, let waiter else { return }
+                    if self.turns[threadID] === waiter {
+                        await self.cancel(threadID: threadID)
+                        if self.turns[threadID] === waiter { self.finish(threadID, .failure(OblivionError.message("Codex took too long. Your context is saved; try again."))) }
                     }
                 }
             }
@@ -165,6 +168,8 @@ final class CodexService: ObservableObject {
 
     private func disconnected() {
         isConnected = false; status = "Codex disconnected"
+        buffer.removeAll(keepingCapacity: false)
+        requestTimeouts.values.forEach { $0.cancel() }; requestTimeouts.removeAll()
         let requests = pending; pending.removeAll()
         for continuation in requests.values { continuation.resume(throwing: OblivionError.message("Codex disconnected. Your local call is saved.")) }
         for thread in Array(turns.keys) { finish(thread, .failure(OblivionError.message("Codex disconnected. Reconnect to continue."))) }
@@ -175,10 +180,12 @@ final class CodexService: ObservableObject {
         return try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             do { try send(["id": id, "method": method, "params": params]) }
-            catch { pending.removeValue(forKey: id)?.resume(throwing: error) }
-            Task {
-                try? await Task.sleep(for: .seconds(35))
-                pending.removeValue(forKey: id)?.resume(throwing: OblivionError.message("Codex connection timed out (\(method))."))
+            catch { pending.removeValue(forKey: id)?.resume(throwing: error); return }
+            requestTimeouts[id] = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(35)) } catch { return }
+                guard let self else { return }
+                self.requestTimeouts.removeValue(forKey: id)
+                self.pending.removeValue(forKey: id)?.resume(throwing: OblivionError.message("Codex connection timed out (\(method))."))
             }
         }
     }
@@ -195,6 +202,7 @@ final class CodexService: ObservableObject {
             let line = buffer[..<end]; buffer.removeSubrange(...end)
             guard let message = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
             if let id = message["id"] as? Int, let continuation = pending.removeValue(forKey: id) {
+                requestTimeouts.removeValue(forKey: id)?.cancel()
                 if let error = message["error"] as? [String: Any] { continuation.resume(throwing: OblivionError.message(error["message"] as? String ?? "Codex request failed.")) }
                 else { continuation.resume(returning: message["result"] as? [String: Any] ?? [:]) }
                 continue
@@ -233,6 +241,7 @@ final class CodexService: ObservableObject {
 
     private func finish(_ thread: String, _ result: Result<String, Error>) {
         guard let waiter = turns.removeValue(forKey: thread), let continuation = waiter.continuation else { return }
+        waiter.timeout?.cancel(); waiter.timeout = nil
         waiter.continuation = nil; continuation.resume(with: result)
     }
 }

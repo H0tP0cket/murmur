@@ -103,7 +103,7 @@ private func jpegFixture() throws -> Data {
     let emphasized = (rendered.string as NSString).range(of: "important")
     let font = try #require(rendered.attribute(.font, at: emphasized.location, effectiveRange: nil) as? NSFont)
     #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
-    let view = ResponseTextView()
+    let view = NSTextView()
     view.isEditable = false; view.isSelectable = true; view.textStorage?.setAttributedString(rendered)
     view.selectAll(nil)
     #expect(view.selectedRange().length == rendered.length)
