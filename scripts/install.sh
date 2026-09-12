@@ -10,4 +10,8 @@ application_destination="$HOME/Applications/Oblivion.app"
 mkdir -p "${application_destination:h}"
 ditto build/Oblivion.app "$application_destination"
 codesign --verify --deep --strict "$application_destination"
+# ditto preserves directory timestamps. Notify Finder and Launch Services that
+# this bundle changed, including its icon, after the completed copy is verified.
+touch "$application_destination"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$application_destination"
 echo "Installed: $application_destination"
