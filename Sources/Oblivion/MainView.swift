@@ -118,7 +118,7 @@ struct MainView: View {
                         }.padding(.top, 60).padding(.bottom, 2)
                     }
                     ForEach(call.messages) { message in MessageRow(message: message, showActions: call.messages.count > 1, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
-                    if state.isBusy { HStack(spacing: 8) { Image(systemName: "sparkle").foregroundStyle(OblivionStyle.blue).symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
+                    if state.isBusy { HStack(spacing: 8) { Image(systemName: "sparkle").foregroundStyle(.secondary).symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
                     Color.clear.frame(height: 1).id("bottom")
                 }.frame(maxWidth: 760).padding(.horizontal, 35).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: .infinity)
             }
@@ -151,8 +151,8 @@ struct MainView: View {
                 }
                 Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
                     Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white).frame(width: 32, height: 32)
-                        .background(OblivionStyle.blue, in: Circle())
+                        .foregroundStyle(.black).frame(width: 32, height: 32)
+                        .background(OblivionStyle.accent, in: Circle())
                         .contentTransition(.symbolEffect(.replace))
                 }.buttonStyle(.plain).opacity(state.isBusy || !state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 1 : 0.3)
                     .disabled(!state.isBusy && state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")

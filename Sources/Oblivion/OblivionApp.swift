@@ -10,7 +10,7 @@ struct OblivionApp: App {
         WindowGroup("Oblivion", id: "main") {
             MainView().environmentObject(state)
                 .preferredColorScheme(.dark)
-                .tint(OblivionStyle.blue)
+                .tint(OblivionStyle.accent)
                 .frame(minWidth: 900, minHeight: 600)
                 .background(WindowReader { window in
                     window.appearance = NSAppearance(named: .darkAqua)

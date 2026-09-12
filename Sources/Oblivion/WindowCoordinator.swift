@@ -130,6 +130,7 @@ struct HUDView: View {
         .background(OblivionStyle.canvas)
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
+        .tint(OblivionStyle.accent)
         .onChange(of: state.recommendation.answer) { _, _ in state.windows.resizeHUD() }
         .onChange(of: state.showDirectQuestion) { _, shown in state.windows.resizeHUD(); inputFocused = shown }
         .onAppear { inputFocused = state.showDirectQuestion }

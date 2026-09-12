@@ -6,7 +6,7 @@ enum OblivionStyle {
     static let canvas = Color(red: 24 / 255, green: 24 / 255, blue: 24 / 255)
     static let sidebar = Color(red: 40 / 255, green: 40 / 255, blue: 40 / 255)
     static let raised = Color(red: 42 / 255, green: 42 / 255, blue: 42 / 255)
-    static let blue = Color(red: 48 / 255, green: 112 / 255, blue: 211 / 255)
+    static let accent = Color(white: 0.92)
     static let windowColor = NSColor(srgbRed: 24 / 255, green: 24 / 255, blue: 24 / 255, alpha: 1)
 }
 

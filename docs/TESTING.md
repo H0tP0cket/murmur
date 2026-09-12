@@ -87,3 +87,9 @@ The HUD Hide button removed the HUD; subsequent computer-use app activation reop
 - Removed the reserved top strip and made the native title bar transparent. Computer use inspected the installed release with Notes and Transcript open: the top bar, conversation, and detail pane share a continuous charcoal background. Settings is dark and no longer contains an appearance selector.
 - Created a flat, monochrome split-O mark informed by the user's cloaked silhouette reference. The native mark, SVG exports, and complete macOS icon set are generated from shared vector geometry. Inspected the icon export and the actual running sidebar/welcome marks at 27 and 48 points.
 - Release compilation, bundle installation/signature verification, and `git diff --check` pass. These visual changes do not add claims about the remaining live meeting checks above.
+
+## Monochrome accents
+
+- Replaced the remaining blue accent with a neutral off-white tint in the main app and HUD. The send/stop control uses a black glyph on an off-white circle; the thinking indicator uses secondary text color.
+- Rebuilt and installed the signed release. Computer use verified the enabled send control, dark sidebar selection, and Settings controls. Cleared the unsent visual-test draft and returned to the empty preparation chat.
+- Simplified the public README with setup instructions and a link to this verification log. Reviewed tracked source and Git history for credentials and personal runtime data before publication; application data and build artifacts remain ignored.
