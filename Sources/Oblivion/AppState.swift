@@ -99,6 +99,7 @@ final class AppState: ObservableObject {
     var selected: CallRecord? { calls.first { $0.id == selectedID } }
     var activeCall: CallRecord? { calls.first { $0.id == activeCallID } }
     var isBusy: Bool { selectedID.map { busyCalls.contains($0) } ?? false }
+    var canSend: Bool { !composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(selected?.unsentImages.isEmpty ?? true) }
     var visibleCalls: [CallRecord] {
         calls.filter { $0.archived == showArchived && (sidebarSearch.isEmpty || $0.title.localizedCaseInsensitiveContains(sidebarSearch) || $0.transcriptText.localizedCaseInsensitiveContains(sidebarSearch)) }.sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -157,13 +158,15 @@ final class AppState: ObservableObject {
     }
 
     func send(_ override: String? = nil, system: Bool = false, displayText: String? = nil) {
-        let text = (override ?? composer).trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = (override ?? composer).trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty, override == nil, !(selected?.unsentImages.isEmpty ?? true) { text = "Help me understand these images in the context of this call." }
         guard !text.isEmpty else { return }
         let id = selectedID ?? newCall()
         guard !busyCalls.contains(id) else { return }
         if override == nil { composer = "" }
         modify(id) { call in
-            call.messages.append(ChatMessage(role: system ? "system" : "user", text: displayText ?? text))
+            let images = system ? [] : call.unsentImages
+            call.messages.append(ChatMessage(role: system ? "system" : "user", text: displayText ?? text, images: images.isEmpty ? nil : images))
             if call.title == "New call" && !system { call.title = String(text.split(separator: "\n").first.map(String.init)?.prefix(54) ?? "New call".prefix(54)) }
         }
         let responseID = UUID()
@@ -180,7 +183,7 @@ final class AppState: ObservableObject {
                 let threadID = try await codex.thread(cwd: library.directory(id), existing: call.threadID)
                 modify(id) { $0.threadID = threadID }
                 let context = chatContext(call: call, question: text)
-                let result = try await codex.run(threadID: threadID, text: context, onText: { [weak self] output in
+                let result = try await codex.run(threadID: threadID, text: context, images: library.imageURLs(for: call), onText: { [weak self] output in
                     self?.modify(id, { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].text = output } }, save: false)
                     if Date().timeIntervalSince(self?.lastSave ?? .distantPast) > 2 { self?.persist(id) }
                 }, onStatus: { [weak self] in self?.chatStatus = $0 })
@@ -214,12 +217,25 @@ final class AppState: ObservableObject {
 
     func chooseAttachment() {
         let id = selectedID ?? newCall()
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.pdf, .plainText, .text]; panel.allowsMultipleSelection = true
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .pdf, .plainText, .text]; panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
+        attachFiles(panel.urls, callID: id)
+    }
+
+    func attachFiles(_ urls: [URL], callID: UUID? = nil) {
+        let id = callID ?? selectedID ?? newCall()
+        for url in urls {
             do { let attachment = try library.importFile(url, callID: id); modify(id) { $0.attachments.append(attachment) } }
             catch { self.error = error.localizedDescription }
         }
+    }
+
+    func attachImage(_ data: Data) {
+        let id = selectedID ?? newCall()
+        do {
+            let attachment = try library.importImage(data, name: "Pasted image", callID: id)
+            modify(id) { $0.attachments.append(attachment) }
+        } catch { self.error = error.localizedDescription }
     }
 
     func importTranscript() {
@@ -380,7 +396,7 @@ final class AppState: ObservableObject {
                 let updates = (removed + changed).joined(separator: "\n")
                 let preparation = isFreshThread ? "\(call.preparationText)\n\nUSER BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")\n\n" : ""
                 let text = "\(preparation)TRANSCRIPT UPDATES (replace earlier versions with the same segment ID; use preparation already in this thread):\n\(updates.suffix(26000))\n\nLIVE STATE: \(audio.localSpeaking ? "The user is speaking." : "The user is listening or there is a pause.")\n\n\(question.map { "THE USER ASKS YOU DIRECTLY: \($0)" } ?? (needsIntroduction ? "This is the start of a new call session. Prepare the opening introduction now." : "Give the one best next recommendation now."))"
-                let result = try await codex.run(threadID: thread, text: text, live: true, schema: Recommendation.schema)
+                let result = try await codex.run(threadID: thread, text: text, images: isFreshThread ? library.imageURLs(for: call) : [], live: true, schema: Recommendation.schema)
                 guard activeCallID == callID, activeSession == sessionID, !callEnding, !Task.isCancelled, transcriptEditGeneration == editGeneration else { return }
                 let cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
                 var next = try JSONDecoder().decode(Recommendation.self, from: Data(cleaned.utf8))
@@ -411,7 +427,7 @@ final class AppState: ObservableObject {
                 guard activeSession == sessionID, !Task.isCancelled else { return }
                 directThread = thread
                 let prompt = "Answer this private question during the user's call, concisely but fully enough to use. You may read transcript.txt in this workspace for the ENTIRE call, and preparation.md and attachments for source details. The recent excerpt below is not the whole conversation. Use tools only when needed. Do not send messages or modify files.\n\nQUESTION:\n\(question)\n\nPREPARATION:\n\(call.preparationText)\n\nRECENT TRANSCRIPT:\n\(call.transcriptText.suffix(12000))"
-                let result = try await codex.run(threadID: thread, text: prompt, live: true, onText: { [weak self] text in
+                let result = try await codex.run(threadID: thread, text: prompt, images: library.imageURLs(for: call), live: true, onText: { [weak self] text in
                     guard let self, self.activeSession == sessionID, !self.callEnding else { return }; self.directAnswer = text
                 })
                 if activeSession == sessionID { directAnswer = result }

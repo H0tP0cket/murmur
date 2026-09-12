@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
+import ImageIO
 
 struct MainView: View {
     @EnvironmentObject var state: AppState
@@ -117,7 +119,7 @@ struct MainView: View {
                             Text("Let’s get you ready.").font(.system(size: 30, weight: .semibold)).tracking(-0.8)
                         }.padding(.top, 60).padding(.bottom, 2)
                     }
-                    ForEach(call.messages) { message in MessageRow(message: message, showActions: call.messages.count > 1, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
+                    ForEach(call.messages) { message in MessageRow(message: message, callID: call.id, showActions: call.messages.count > 1, save: { state.editingStory = PreparedStory(title: "Prepared answer", body: message.text) }) }
                     if state.isBusy { HStack(spacing: 8) { Image(systemName: "sparkle").foregroundStyle(.secondary).symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion); Text(state.chatStatus).font(.system(size: 12)).foregroundStyle(.secondary) } }
                     Color.clear.frame(height: 1).id("bottom")
                 }.frame(maxWidth: 760).padding(.horizontal, 35).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: .infinity)
@@ -138,24 +140,29 @@ struct MainView: View {
             if let call = state.selected, !call.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack { ForEach(call.attachments) { attachment in
-                        HStack(spacing: 6) { Image(systemName: "doc.text"); Text(attachment.name).lineLimit(1); Button { state.modify(call.id) { $0.attachments.removeAll { $0.id == attachment.id } } } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).help("Remove from context") }
+                        HStack(spacing: 6) {
+                            if attachment.isImage { ImageAttachmentView(url: state.library.imageURL(attachment, callID: call.id), name: attachment.name, size: 30) }
+                            else { Image(systemName: "doc.text") }
+                            Text(attachment.name).lineLimit(1).frame(maxWidth: 150)
+                            Button { state.modify(call.id) { $0.attachments.removeAll { $0.id == attachment.id } } } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).help("Remove from context").accessibilityLabel("Remove \(attachment.name) from context")
+                        }
                             .font(.system(size: 11)).padding(8).background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     } }
-                }.frame(height: 36)
+                }.frame(height: call.attachments.contains(where: \.isImage) ? 50 : 36)
             }
             HStack(alignment: .bottom, spacing: 9) {
-                Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach PDF or text")
+                Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach images, PDFs, or text")
                 ZStack(alignment: .topLeading) {
                     if state.composer.isEmpty { Text("Ask anything, or add context…").font(.system(size: 14)).foregroundStyle(.secondary.opacity(0.7)).padding(.top, 7).padding(.leading, 5).allowsHitTesting(false) }
-                    ComposerEditor(text: $state.composer, height: $composerHeight, focused: $composerFocused, onSubmit: { state.send() }).frame(height: composerHeight)
+                    ComposerEditor(text: $state.composer, height: $composerHeight, focused: $composerFocused, onSubmit: { state.send() }, onImage: state.attachImage, onFiles: { state.attachFiles($0) }).frame(height: composerHeight)
                 }
                 Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
                     Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.black).frame(width: 32, height: 32)
                         .background(OblivionStyle.accent, in: Circle())
                         .contentTransition(.symbolEffect(.replace))
-                }.buttonStyle(.plain).opacity(state.isBusy || !state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 1 : 0.3)
-                    .disabled(!state.isBusy && state.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")
+                }.buttonStyle(.plain).opacity(state.isBusy || state.canSend ? 1 : 0.3)
+                    .disabled(!state.isBusy && !state.canSend).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")
             }.padding(10)
                 .background(OblivionStyle.raised, in: RoundedRectangle(cornerRadius: 24))
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(composerFocused ? 0.18 : 0.07), lineWidth: 0.7))
@@ -210,13 +217,22 @@ struct CallRow: View {
 }
 
 struct MessageRow: View {
+    @EnvironmentObject private var state: AppState
     var message: ChatMessage
+    var callID: UUID
     var showActions = true
     var save: () -> Void
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 9) {
             if message.role == "system" { Label(message.text, systemImage: "checkmark.circle").font(.system(size: 12)).foregroundStyle(.secondary) }
             else {
+                if let images = message.images, !images.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack { ForEach(images) { attachment in
+                            ImageAttachmentView(url: state.library.imageURL(attachment, callID: callID), name: attachment.name, size: 112)
+                        } }
+                    }.frame(height: 116)
+                }
                 HStack(alignment: .top) {
                     if message.role == "user" { Spacer(minLength: 50) }
                     Group {
@@ -242,6 +258,8 @@ struct ComposerEditor: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var focused: Bool
     var onSubmit: () -> Void
+    var onImage: (Data) -> Void
+    var onFiles: ([URL]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
@@ -250,6 +268,7 @@ struct ComposerEditor: NSViewRepresentable {
         editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.containerSize.height = .greatestFiniteMagnitude
         editor.delegate = context.coordinator; editor.onSubmit = onSubmit; editor.setAccessibilityLabel("Message")
+        editor.onImage = onImage; editor.onFiles = onFiles
         editor.onLayout = { [weak coordinator = context.coordinator, weak editor] in if let editor { coordinator?.measure(editor) } }
         editor.onFocus = { [weak coordinator = context.coordinator] focus in coordinator?.parent.focused = focus }
         scroll.documentView = editor
@@ -260,6 +279,7 @@ struct ComposerEditor: NSViewRepresentable {
         guard let editor = scroll.documentView as? SubmitTextView else { return }
         editor.appearance = NSAppearance(named: .darkAqua)
         editor.onSubmit = onSubmit
+        editor.onImage = onImage; editor.onFiles = onFiles
         if editor.string != text { editor.string = text }
         context.coordinator.measure(editor)
     }
@@ -290,11 +310,60 @@ final class SubmitTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onLayout: (() -> Void)?
     var onFocus: ((Bool) -> Void)?
+    var onImage: ((Data) -> Void)?
+    var onFiles: (([URL]) -> Void)?
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { super.readablePasteboardTypes + [.png, .tiff, .fileURL] }
+    override func paste(_ sender: Any?) {
+        if pasteAttachments(from: .general) { return }
+        super.paste(sender)
+    }
+    @discardableResult func pasteAttachments(from pasteboard: NSPasteboard) -> Bool {
+        let urls = (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if !urls.isEmpty, let onFiles { onFiles(urls); return true }
+        // Preview can offer OCR text alongside copied pixels. Prefer the image
+        // when present; ordinary chat/text paste falls through to NSTextView.
+        if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff), let onImage {
+            onImage(data); return true
+        }
+        return false
+    }
     override func layout() { super.layout(); onLayout?() }
     override func becomeFirstResponder() -> Bool { let accepted = super.becomeFirstResponder(); if accepted { onFocus?(true) }; return accepted }
     override func resignFirstResponder() -> Bool { let accepted = super.resignFirstResponder(); if accepted { onFocus?(false) }; return accepted }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) && !hasMarkedText() { onSubmit?() }
         else { super.keyDown(with: event) }
+    }
+}
+
+private struct ImageAttachmentView: View {
+    var url: URL?
+    var name: String
+    var size: CGFloat
+    @State private var thumbnail: NSImage?
+    @State private var preview = false
+    var body: some View {
+        Button { preview = true } label: {
+            Group {
+                if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit() }
+                else { Image(systemName: "photo").foregroundStyle(.secondary) }
+            }.frame(width: size, height: size)
+                .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain).accessibilityLabel("Preview \(name)").help(name)
+            .task(id: url) {
+                thumbnail = nil
+                if let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 600] as CFDictionary) {
+                    thumbnail = NSImage(cgImage: image, size: .zero)
+                }
+            }
+            .popover(isPresented: $preview) {
+                VStack(spacing: 14) {
+                    HStack { Text(name).font(.headline).lineLimit(1); Spacer(); Button("Done") { preview = false } }
+                    if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().frame(maxWidth: 520, maxHeight: 420) }
+                    if let url { Button("Open full image") { NSWorkspace.shared.open(url) } }
+                }.padding(18).frame(width: 556).preferredColorScheme(.dark).tint(OblivionStyle.accent)
+            }
     }
 }

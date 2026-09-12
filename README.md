@@ -4,7 +4,7 @@
 
 A native macOS copilot for better conversations. Prepare in a chat, get live coaching during a call, and keep the transcript and notes afterward.
 
-- Free-form preparation with PDFs, text, links, and research.
+- Free-form preparation with images, PDFs, text, links, and research.
 - A floating HUD with one next recommendation, full prepared answers, and quick private questions.
 - On-device transcription of microphone and meeting audio.
 - Searchable, editable transcripts and notes attached to each conversation.
@@ -23,6 +23,8 @@ open ~/Applications/Oblivion.app
 
 Quit Oblivion before reinstalling. Run `scripts/test.sh` for tests.
 
-Chats and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text is sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
+Use **+** to attach files, or paste screenshots and copied image files into the composer. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; its Copy button copies the full Markdown response.
+
+Chats, attachments, and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text and attached images are sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
 
 Personal project, still being tested. See the [verification log](docs/TESTING.md) for tested flows and remaining meeting-integration checks.

@@ -7,6 +7,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var createdAt = Date()
     var interrupted = false
     var pending: Bool?
+    var images: [Attachment]?
 }
 
 struct Attachment: Codable, Identifiable, Equatable {
@@ -15,6 +16,9 @@ struct Attachment: Codable, Identifiable, Equatable {
     var relativePath: String
     var text: String
     var sourceURL: String?
+    // Optional so pre-image libraries continue to decode without migration.
+    var imageRelativePath: String?
+    var isImage: Bool { imageRelativePath != nil }
 }
 
 struct PreparedStory: Codable, Identifiable, Equatable {
@@ -69,6 +73,11 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var sessions: [CallSession] = []
     var intro = ""
 
+    var unsentImages: [Attachment] {
+        let sent = Set(messages.flatMap { $0.images ?? [] }.map(\.id))
+        return attachments.filter { $0.isImage && !sent.contains($0.id) }
+    }
+
     var transcriptText: String {
         transcript.map { "[\($0.timestamp)] \($0.speaker)\($0.isFinal ? "" : " [partial]"): \($0.text)" }.joined(separator: "\n")
     }
@@ -76,7 +85,7 @@ struct CallRecord: Codable, Identifiable, Equatable {
         let chat = messages.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n")
         let chatContext = chat.count > 32000 ? "\(chat.prefix(8000))\n\n[Middle of the preparation is stored in conversation.md.]\n\n\(chat.suffix(24000))" : chat
         let approved = stories.filter(\.approved).map { "STORY ID \($0.id): \($0.title)\nUse for: \($0.cues)\n\($0.body)" }.joined(separator: "\n\n")
-        let sources = attachments.map { "SOURCE \($0.name) \($0.sourceURL ?? "")\n\($0.text.prefix(10000))" }.joined(separator: "\n\n")
+        let sources = attachments.map { "SOURCE \($0.name) \($0.sourceURL ?? "")\nFILE: \($0.imageRelativePath ?? $0.relativePath)\n\($0.text.prefix(10000))" }.joined(separator: "\n\n")
         return "CALL: \(title)\n\nPREPARATION CHAT:\n\(chatContext)\n\nAPPROVED STORIES:\n\(approved)\n\nSOURCES:\n\(sources.prefix(30000))\n\nUSER NOTES:\n\(notes)\n\nCALL NOTES SO FAR:\n\(generatedNotes)"
     }
 }
@@ -101,6 +110,7 @@ struct ModelOption: Identifiable {
     var name: String
     var efforts: [String]
     var defaultEffort: String
+    var inputModalities: [String] = ["text", "image"]
 }
 
 enum OblivionError: LocalizedError {

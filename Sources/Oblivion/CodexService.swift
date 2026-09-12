@@ -73,7 +73,7 @@ final class CodexService: ObservableObject {
             let result = try await request("model/list", params)
             choices += (result["data"] as? [[String: Any]] ?? []).compactMap { item in
                 guard let model = item["model"] as? String else { return nil }
-                return ModelOption(id: model, name: item["displayName"] as? String ?? model, efforts: (item["supportedReasoningEfforts"] as? [[String: Any]] ?? []).compactMap { $0["reasoningEffort"] as? String }, defaultEffort: item["defaultReasoningEffort"] as? String ?? "low")
+                return ModelOption(id: model, name: item["displayName"] as? String ?? model, efforts: (item["supportedReasoningEfforts"] as? [[String: Any]] ?? []).compactMap { $0["reasoningEffort"] as? String }, defaultEffort: item["defaultReasoningEffort"] as? String ?? "low", inputModalities: item["inputModalities"] as? [String] ?? ["text", "image"])
             }
             cursor = result["nextCursor"] as? String
         } while cursor != nil
@@ -103,9 +103,15 @@ final class CodexService: ObservableObject {
         return id
     }
 
-    func run(threadID: String, text: String, live: Bool = false, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
+    func run(threadID: String, text: String, images: [URL] = [], live: Bool = false, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
         try Task.checkCancellation()
         guard turns[threadID] == nil else { throw OblivionError.message("This conversation is still responding.") }
+        if !images.isEmpty, let selected = model(live: live), let option = models.first(where: { $0.id == selected }), !option.inputModalities.contains("image") {
+            throw OblivionError.message("\(option.name) doesn’t accept images. Choose an image-capable model in Settings.")
+        }
+        guard images.allSatisfy({ $0.isFileURL && FileManager.default.isReadableFile(atPath: $0.path) }) else {
+            throw OblivionError.message("An attached image is missing. Remove it and attach it again.")
+        }
         let requestID = UUID()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
@@ -114,7 +120,8 @@ final class CodexService: ObservableObject {
                 turns[threadID] = waiter
                 Task {
                     do {
-                        var params: [String: Any] = ["threadId": threadID, "input": [["type": "text", "text": text]]]
+                        let inputs: [[String: Any]] = [["type": "text", "text": text]] + images.map { ["type": "localImage", "path": $0.path] }
+                        var params: [String: Any] = ["threadId": threadID, "input": inputs]
                         if let model = model(live: live) {
                             params["model"] = model
                             if let option = models.first(where: { $0.id == model }) {
