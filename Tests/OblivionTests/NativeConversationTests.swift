@@ -84,3 +84,40 @@ import Testing
     #expect(text.actionButtons.count < 20)
     #expect(Set(text.actionButtons.keys).isDisjoint(with: oldURLs))
 }
+
+@Test @MainActor func userBubblesFitContentAlignRightAndReflowWithoutChangingSelection() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-bubbles-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let library = try LibraryStore(root: root)
+    let text = ChatDocumentView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    text.textContainerInset = NSSize(width: 28, height: 18)
+    text.isHorizontallyResizable = false; text.isVerticallyResizable = true
+    text.textContainer?.widthTracksTextView = true; text.textContainer?.lineFragmentPadding = 0
+    let coordinator = NativeConversationView.Coordinator(); coordinator.textView = text
+    let longPrompt = "START OF PROMPT\n\n" + String(repeating: "A long preparation paragraph that should wrap inside its own bubble. ", count: 50) + "\n\nEND OF PROMPT"
+    let messages = [ChatMessage(role: "assistant", text: "Ready when you are."), ChatMessage(role: "user", text: "hi"), ChatMessage(role: "assistant", text: "Hello!"), ChatMessage(role: "user", text: longPrompt), ChatMessage(role: "assistant", text: "Everything is still available.")]
+    coordinator.update(NativeConversationView(callID: UUID(), messages: messages, library: library, busy: false, status: "", save: { _ in }))
+    text.layoutManager?.ensureLayout(for: text.textContainer!)
+    let short = text.bubbleRect(for: text.userMessages[0])
+    let long = text.bubbleRect(for: text.userMessages[1])
+    #expect(short.width >= 40 && short.width < 60)
+    #expect(long.width <= text.messageColumnWidth * 0.82 + 0.5)
+    #expect(abs(short.maxX - long.maxX) < 0.5)
+    #expect(short.minX > long.minX)
+    #expect(short.height >= 30)
+    #expect(long.height > short.height)
+    let original = text.string
+    let selected = (original as NSString).range(of: "hi\n\nHello!")
+    text.setSelectedRange(selected)
+    text.setFrameSize(NSSize(width: 420, height: text.frame.height))
+    text.layoutManager?.ensureLayout(for: text.textContainer!)
+    let narrowShort = text.bubbleRect(for: text.userMessages[0])
+    let narrowLong = text.bubbleRect(for: text.userMessages[1])
+    #expect(abs(narrowShort.width - short.width) < 0.5)
+    #expect(abs(narrowShort.maxX - narrowLong.maxX) < 0.5)
+    #expect(narrowLong.width < long.width)
+    #expect(narrowLong.height > long.height)
+    #expect(text.string == original)
+    #expect(text.string.contains(longPrompt))
+    #expect(text.selectedRange() == selected)
+}

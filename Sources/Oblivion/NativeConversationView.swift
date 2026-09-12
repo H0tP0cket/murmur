@@ -65,6 +65,7 @@ struct NativeConversationView: NSViewRepresentable {
         private var imageLinks: [String: URL] = [:]
         private var thumbnails: [URL: NSImage] = [:]
         private var imagePopover: NSPopover?
+        private var userWidths: [UUID: (text: String, width: CGFloat)] = [:]
 
         func update(_ next: NativeConversationView) {
             guard let view = textView, let storage = view.textStorage else { return }
@@ -74,7 +75,7 @@ struct NativeConversationView: NSViewRepresentable {
             guard switched || previous != next.messages || status != previousStatus else { return }
             if switched {
                 previous = []; offsets = []; messageEnd = 0
-                thumbnails = [:]; imageLinks = [:]; following = true
+                thumbnails = [:]; imageLinks = [:]; userWidths = [:]; following = true
             }
             if next.messages.count > previous.count { following = true }
             var prefix = 0
@@ -92,10 +93,19 @@ struct NativeConversationView: NSViewRepresentable {
             storage.replaceCharacters(in: NSRange(location: start, length: storage.length - start), with: tail)
             storage.endEditing()
             previous = next.messages; previousStatus = status
-            view.userRanges = next.messages.enumerated().compactMap { index, message in
+            view.userMessages = next.messages.enumerated().compactMap { index, message in
                 guard message.role == "user" else { return nil }
                 let end = index + 1 < offsets.count ? offsets[index + 1] : messageEnd
-                return NSRange(location: offsets[index], length: max(0, end - offsets[index] - 2))
+                let textWidth: CGFloat
+                if let cached = userWidths[message.id], cached.text == message.text { textWidth = cached.width }
+                else {
+                    // Measure unwrapped text once, not again during every scroll or
+                    // streaming update. TextKit still owns the actual wrapped layout.
+                    textWidth = (message.text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 15)]).width
+                    userWidths[message.id] = (message.text, textWidth)
+                }
+                let imageWidth = (message.images ?? []).map { 112 + ("  " + $0.name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width }.max() ?? 0
+                return UserMessageLayout(range: NSRange(location: offsets[index], length: max(0, end - offsets[index] - 2)), naturalWidth: max(textWidth, imageWidth))
             }
             view.needsDisplay = true
             view.scheduleActionLayout()
@@ -192,6 +202,14 @@ struct NativeConversationView: NSViewRepresentable {
             return true
         }
 
+        func textView(_ textView: NSTextView, clickedOn cell: NSTextAttachmentCellProtocol, in cellFrame: NSRect, at charIndex: Int) {
+            // AppKit sends attachment clicks through the cell delegate, rather
+            // than the ordinary link delegate used by text.
+            guard let storage = textView.textStorage, charIndex < storage.length,
+                  let link = storage.attribute(.link, at: charIndex, effectiveRange: nil) else { return }
+            _ = self.textView(textView, clickedOnLink: link, at: charIndex)
+        }
+
         func popoverDidClose(_ notification: Notification) { imagePopover = nil }
 
         func updateFollowing() {
@@ -236,8 +254,19 @@ extension NSAttributedString.Key {
     static let oblivionAction = NSAttributedString.Key("OblivionMessageAction")
 }
 
+struct UserMessageLayout {
+    var range: NSRange
+    var naturalWidth: CGFloat
+
+    func bubbleWidth(in columnWidth: CGFloat) -> CGFloat {
+        min(max(40, ceil(naturalWidth) + 28), max(40, columnWidth * 0.82))
+    }
+}
+
 final class ChatDocumentView: NSTextView {
-    var userRanges: [NSRange] = []
+    var userMessages: [UserMessageLayout] = [] {
+        didSet { applyUserMessageLayout() }
+    }
     var onWidthChanged: (() -> Void)?
     var onAction: ((URL) -> Void)?
     private(set) var actionButtons: [URL: ChatActionButton] = [:]
@@ -255,7 +284,38 @@ final class ChatDocumentView: NSTextView {
 
     override func layout() {
         super.layout()
+        applyUserMessageLayout()
         layoutActionButtons()
+    }
+
+    var messageColumnWidth: CGFloat { max(1, bounds.width - 2 * textContainerInset.width) }
+
+    private func applyUserMessageLayout() {
+        guard let textStorage, messageColumnWidth > 40 else { return }
+        var edits: [(NSRange, NSParagraphStyle)] = []
+        for message in userMessages where message.range.length > 0 && NSMaxRange(message.range) <= textStorage.length {
+            let indent = messageColumnWidth - message.bubbleWidth(in: messageColumnWidth) + 14
+            let current = textStorage.attribute(.paragraphStyle, at: message.range.location, effectiveRange: nil) as? NSParagraphStyle
+            guard current?.headIndent != indent || current?.tailIndent != -14 else { continue }
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 4
+            paragraph.firstLineHeadIndent = indent; paragraph.headIndent = indent; paragraph.tailIndent = -14
+            edits.append((message.range, paragraph))
+        }
+        guard !edits.isEmpty else { return }
+        textStorage.beginEditing()
+        for (range, paragraph) in edits { textStorage.addAttribute(.paragraphStyle, value: paragraph, range: range) }
+        textStorage.endEditing()
+        needsDisplay = true
+        scheduleActionLayout()
+    }
+
+    func bubbleRect(for message: UserMessageLayout) -> NSRect {
+        guard let layoutManager, let textContainer, message.range.length > 0 else { return .zero }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: message.range, actualCharacterRange: nil)
+        let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        let width = message.bubbleWidth(in: messageColumnWidth)
+        return NSRect(x: textContainerOrigin.x + messageColumnWidth - width, y: bounds.minY - 10, width: width, height: bounds.height + 20)
     }
 
     override func accessibilityChildren() -> [Any]? {
@@ -314,22 +374,23 @@ final class ChatDocumentView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         let changed = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
-        if changed { onWidthChanged?(); scheduleActionLayout() }
+        if changed { applyUserMessageLayout(); onWidthChanged?(); scheduleActionLayout() }
     }
-    override func drawBackground(in rect: NSRect) {
-        super.drawBackground(in: rect)
+    override func draw(_ dirtyRect: NSRect) {
+        // NSTextView clips drawBackground(in:) to its text-line regions. A bubble
+        // includes padding outside those regions, so paint it at document level.
+        drawUserBubbles(in: dirtyRect)
+        super.draw(dirtyRect)
+    }
+
+    private func drawUserBubbles(in rect: NSRect) {
         guard let layoutManager, let textContainer else { return }
         let origin = textContainerOrigin
-        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
+        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: rect.insetBy(dx: 0, dy: -12).offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
         let visibleCharacters = layoutManager.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil)
         NSColor(white: 1, alpha: 0.045).setFill()
-        for range in userRanges where NSIntersectionRange(range, visibleCharacters).length > 0 {
-            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).offsetBy(dx: origin.x, dy: origin.y)
-            // TextKit's bounds include paragraph indentation. Drawing another
-            // horizontal inset around that double-counted the user's left padding.
-            let bubble = NSRect(x: origin.x, y: bounds.minY - 10, width: textContainer.size.width, height: bounds.height + 20)
-            NSBezierPath(roundedRect: bubble, xRadius: 16, yRadius: 16).fill()
+        for message in userMessages where NSIntersectionRange(message.range, visibleCharacters).length > 0 {
+            NSBezierPath(roundedRect: bubbleRect(for: message), xRadius: 16, yRadius: 16).fill()
         }
     }
 }
