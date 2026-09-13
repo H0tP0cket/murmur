@@ -37,14 +37,7 @@ struct DetailView: View {
             if showingAINotes {
                 generatedNotes(call)
             } else {
-                ZStack(alignment: .topLeading) {
-                    if call.notes.isEmpty {
-                        Text("Jot anything down…").font(.system(size: 15)).foregroundStyle(.tertiary).padding(.leading, 5).padding(.top, 1).allowsHitTesting(false)
-                    }
-                    TextEditor(text: Binding(get: { state.calls.first(where: { $0.id == call.id })?.notes ?? "" }, set: { state.editNotes(callID: call.id, text: $0) }))
-                        .font(.system(size: 15)).lineSpacing(6).scrollContentBackground(.hidden)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel("Your notes").id(call.id)
-                }.padding(.horizontal, 20)
+                PersonalNotesEditor(callID: call.id).padding(.horizontal, 20)
                 HStack {
                     Text("Saved with this call").font(.system(size: 10)).foregroundStyle(.tertiary)
                     Spacer()
@@ -126,6 +119,29 @@ struct DetailView: View {
                 HStack { Text("\(call.transcript.count) passages"); Spacer(); Button("Export") { state.exportCall() } }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 15)
             }
         }.frame(maxHeight: .infinity)
+    }
+}
+
+/// The sidebar and floating notepad edit the same saved notes by call identity.
+struct PersonalNotesEditor: View {
+    @EnvironmentObject var state: AppState
+    let callID: UUID
+    var focusOnAppear = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if (state.calls.first(where: { $0.id == callID })?.notes ?? "").isEmpty {
+                Text("Jot anything down…").font(.system(size: 15)).foregroundStyle(.tertiary)
+                    .padding(.leading, 5).padding(.top, 1).allowsHitTesting(false)
+            }
+            TextEditor(text: Binding(get: { state.calls.first(where: { $0.id == callID })?.notes ?? "" }, set: { state.editNotes(callID: callID, text: $0) }))
+                .font(.system(size: 15)).lineSpacing(6).scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel("Your notes")
+                .focused($focused).id(callID)
+        }
+        .onAppear { if focusOnAppear { focused = true } }
+        .onDisappear { state.flushNoteEdits() }
     }
 }
 
