@@ -1,9 +1,11 @@
 import Foundation
+import Darwin
 
 // Native Chrome messaging helper. No Python or developer tools required.
 let origin = "chrome-extension://koikkoppmobklaimhplgjgkfljiclnjj/"
 let root = ProcessInfo.processInfo.environment["MURMUR_LIBRARY_ROOT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Oblivion")
 let input = FileHandle.standardInput, output = FileHandle.standardOutput
+umask(0o077)
 
 func readExactly(_ count: Int) -> Data? {
     var data = Data()

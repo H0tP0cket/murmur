@@ -19,6 +19,8 @@ final class LibraryStore {
 
     init(root: URL? = nil) throws {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Oblivion", isDirectory: true)
+        try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.root.path)
         try FileManager.default.createDirectory(at: self.root.appendingPathComponent("Calls"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
 

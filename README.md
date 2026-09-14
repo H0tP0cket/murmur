@@ -48,7 +48,9 @@ In **Settings → Personal context**, expand **Build your context with ChatGPT**
 
 **Save for call** opens **Cue cards** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing saved wording remains available. This is priority context, not a separate model cache or a guarantee of perfect matching.
 
-**Notes** opens a full-height personal notepad. In the pop-out HUD, **Notes** reopens the active call in the main app with its notes sidebar while keeping live guidance visible. You can take notes, use the chat, and reference earlier context together. **Pop out** returns to the overlay alone; the hide shortcut toggles just the overlay. Your notes are saved with the call and included when you ask the chat to reference them. Drag the panel edge to widen the notepad. Expand **AI notes** below it, and drag the horizontal divider to choose how much space each gets. AI notes use the conversation by default or follow your written notes when present. Opening the section refreshes changed source material; **Update** refreshes it on demand. Manual edits remain protected until you accept a proposed replacement.
+**Notes** opens a full-height personal notepad. From the HUD, it restores the main chat with notes while keeping live guidance visible. **Pop out** returns to the overlay alone. Notes are saved with the call and available when you ask the chat to reference them. Drag the panel edge to widen it.
+
+Expand **AI notes** below your notepad and drag the divider to resize both sections. AI notes summarize the conversation or follow your written notes when present. Opening the section refreshes changed source material; **Update** refreshes it on demand. Manual edits remain protected until you accept a proposed replacement.
 
 Chats, attachments, and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text and attached images are sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
 

@@ -13,7 +13,9 @@ scripts/build.sh
 release_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)
 release_name="MurMur-${release_version}-arm64"
 release_bundle="$PWD/.build/bundle/MurMur.app"
-mkdir -p dist .build/dmg
+mkdir -p dist
+release_stage=$(mktemp -d "$PWD/.build/murmur-dmg.XXXXXX")
+trap '/usr/bin/trash "$release_stage"' EXIT
 if [[ "$release_mode" == --signed ]]; then
   ditto -c -k --sequesterRsrc --keepParent "$release_bundle" .build/notarize.zip
   xcrun notarytool submit .build/notarize.zip --keychain-profile "$MURMUR_NOTARY_PROFILE" --wait
@@ -21,11 +23,10 @@ if [[ "$release_mode" == --signed ]]; then
   spctl --assess --type execute --verbose "$release_bundle"
 fi
 # Explicit allowlist. No library, auth, test screenshots or developer settings.
-[[ ! -e .build/dmg/MurMur.app ]] || /usr/bin/trash .build/dmg/MurMur.app
-ditto "$release_bundle" .build/dmg/MurMur.app
-ln -sfn /Applications .build/dmg/Applications
-cp docs/INSTALL.txt '.build/dmg/Read me first.txt'
-hdiutil create -quiet -ov -volname MurMur -srcfolder .build/dmg -format UDZO "dist/${release_name}.dmg"
+ditto "$release_bundle" "$release_stage/MurMur.app"
+ln -s /Applications "$release_stage/Applications"
+cp docs/INSTALL.txt "$release_stage/Read me first.txt"
+hdiutil create -quiet -ov -volname MurMur -srcfolder "$release_stage" -format UDZO "dist/${release_name}.dmg"
 if [[ "$release_mode" == --signed ]]; then
   codesign --timestamp --sign "$MURMUR_SIGNING_IDENTITY" "dist/${release_name}.dmg"
   xcrun notarytool submit "dist/${release_name}.dmg" --keychain-profile "$MURMUR_NOTARY_PROFILE" --wait

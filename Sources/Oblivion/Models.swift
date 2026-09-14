@@ -109,22 +109,6 @@ struct CallRecord: Codable, Identifiable, Equatable {
     }
 }
 
-struct CallTitleSuggestion: Codable {
-    var person: String?
-    var companyOrRole: String?
-    var title: String? {
-        func clean(_ value: String?) -> String { String((value ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(80)) }
-        let name = clean(person), context = clean(companyOrRole)
-        guard !name.isEmpty else { return nil }
-        return context.isEmpty ? name : "\(name) · \(context)"
-    }
-    static let schema: [String: Any] = [
-        "type": "object", "additionalProperties": false,
-        "properties": ["person": ["type": ["string", "null"]], "companyOrRole": ["type": ["string", "null"]]],
-        "required": ["person", "companyOrRole"]
-    ]
-}
-
 struct Recommendation: Codable, Equatable {
     var kind: String
     var coaching: String

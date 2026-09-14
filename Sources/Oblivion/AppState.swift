@@ -116,7 +116,7 @@ final class AppState: ObservableObject {
 
     @discardableResult func newCall() -> UUID {
         let call = CallRecord(title: nextCallTitle(in: selectedFolderID), folderID: selectedFolderID, prepModel: UserDefaults.standard.string(forKey: "prepModel").flatMap { $0.isEmpty ? nil : $0 }, prepEffort: UserDefaults.standard.string(forKey: "prepEffort").flatMap { $0.isEmpty ? nil : $0 }, automaticTitlePending: false)
-        calls.insert(call, at: 0); selectedID = call.id; composer = ""; detail = nil; showArchived = false
+        calls.insert(call, at: 0); selectedID = call.id; composer = ""; detail = nil; showArchived = false; sidebarSearch = ""
         persist(call.id)
         return call.id
     }

@@ -10,3 +10,4 @@ if [[ "$developer_dir" == */CommandLineTools ]]; then
 else
   swift test "$@"
 fi
+python3 Tests/test_meet_bridge.py
