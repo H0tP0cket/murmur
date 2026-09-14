@@ -245,5 +245,5 @@ import Testing
     #expect(vtt[0].end == 68.5)
     #expect(vtt[0].text == "Forty minutes.")
     let untimed=try TranscriptImporter.parse("Morgan: No timestamps here.",session:session)
-    #expect(untimed[0].timestamp == "—")
+    #expect(untimed[0].timestamp == "Untimed")
 }

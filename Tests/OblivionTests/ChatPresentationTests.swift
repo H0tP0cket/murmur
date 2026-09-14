@@ -82,7 +82,7 @@ import Testing
     let font = try #require(rendered.attribute(.font, at: strong.location, effectiveRange: nil) as? NSFont)
     #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
     let fallback = MarkdownBody.render(markdown, fontSize: 15, nativeTables: false)
-    #expect(fallback.string.contains("If he says…: Claims are slow\nAsk…: Who owns the work?"))
+    #expect(fallback.string.contains("If he says…\nClaims are slow\nAsk…\nWho owns the work?"))
 
     let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
     view.isEditable = false; view.isSelectable = true; view.isVerticallyResizable = true

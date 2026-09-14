@@ -7,15 +7,25 @@ struct MainView: View {
     @EnvironmentObject var state: AppState
     @State private var sidebarVisible = true
     @State private var renameID: UUID?
-    @State private var renameText = ""
     @State private var composerHeight: CGFloat = 32
     @State private var composerFocused = false
+    @State private var detailWidth: CGFloat = 360
+    @State private var windowWidth: CGFloat = 1120
+    private var maximumDetailWidth: CGFloat { max(300, min(680, windowWidth - (sidebarVisible ? 224 : 0) - 360)) }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         HStack(spacing: 0) {
-            if sidebarVisible { sidebar.frame(width: 224) }
+            // Keep the sidebar at its natural width while its viewport slides
+            // closed. Rows never squeeze, and reopening preserves scroll state.
+            sidebar.frame(width: 224)
+                .offset(x: sidebarVisible ? 0 : -224)
+                .frame(width: sidebarVisible ? 224 : 0, alignment: .leading)
+                .clipped()
+                .allowsHitTesting(sidebarVisible)
+                .disabled(!sidebarVisible)
+                .accessibilityHidden(!sidebarVisible)
             VStack(spacing: 0) {
-                header
+                header.zIndex(1)
                 if let message = state.error { errorBanner(message) }
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -28,20 +38,22 @@ struct MainView: View {
                         composer
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if let detail = state.detail, state.selected != nil { Divider(); DetailView(detail: detail).frame(width: 340) }
+                    if let detail = state.detail, state.selected != nil {
+                        DetailView(detail: detail).frame(width: min(detailWidth, maximumDetailWidth))
+                            .overlay(alignment: .leading) { SidebarResizeHandle(width: $detailWidth, maximum: maximumDetailWidth) }
+                            .transition(.move(edge: .trailing))
+                    }
                 }
+                .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: state.detail != nil)
+                .clipped()
             }
             .background(OblivionStyle.canvas)
         }
         .ignoresSafeArea(.container, edges: .top)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .sheet(isPresented: $state.showCallSetup) { CallSetupView().environmentObject(state) }
         .sheet(isPresented: $state.showSettings) { SettingsView().environmentObject(state) }
         .sheet(item: $state.editingStory) { story in StoryEditor(story: story).environmentObject(state) }
-        .alert("Rename call", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
-            TextField("Call name", text: $renameText)
-            Button("Save") { if let id = renameID { state.renameCall(id, title: renameText) }; renameID = nil }
-            Button("Cancel", role: .cancel) { renameID = nil }
-        }
     }
 
     private var sidebar: some View {
@@ -58,7 +70,7 @@ struct MainView: View {
             ScrollView {
                 LazyVStack(spacing: 3) {
                     ForEach(state.visibleCalls) { call in
-                        CallRow(call: call, selected: call.id == state.selectedID, active: call.id == state.activeCallID, select: { state.selectedID = call.id }, transcript: { state.selectedID = call.id; state.detail = .transcript }, rename: { renameID = call.id; renameText = call.title }, archive: { state.archive(call.id) })
+                        CallRow(call: call, selected: call.id == state.selectedID, active: call.id == state.activeCallID, select: { state.selectedID = call.id }, transcript: { state.selectedID = call.id; state.detail = .transcript }, rename: { state.selectedID = call.id; renameID = call.id }, archive: { state.archive(call.id) })
                     }
                 }.padding(.horizontal, 10)
             }
@@ -75,13 +87,22 @@ struct MainView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Button { sidebarVisible.toggle() } label: { Image(systemName: "sidebar.left") }.buttonStyle(.plain).foregroundStyle(.secondary).help("Toggle sidebar")
-            Text(state.selected?.title ?? "Oblivion").font(.system(size: 14, weight: .medium)).lineLimit(1)
+            Button {
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0)) { sidebarVisible.toggle() }
+            } label: { Image(systemName: "sidebar.left") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .hoverHint(sidebarVisible ? "Hide sidebar" : "Show sidebar")
+                .accessibilityLabel(sidebarVisible ? "Hide sidebar" : "Show sidebar")
+            if let call = state.selected {
+                EditableCallTitle(title: call.title, requestFocus: renameID == call.id,
+                                  didFocus: { renameID = nil }, save: { state.renameCall(call.id, title: $0) })
+                    .id(call.id).padding(.leading, -6)
+            } else { Text("Oblivion").font(.system(size: 14, weight: .medium)) }
             Spacer(minLength: 8)
             if state.selected != nil {
                 HStack(spacing: 2) {
-                    Button { state.detail = state.detail == .notes ? nil : .notes } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.help("Notes")
-                    Button { state.detail = state.detail == .stories ? nil : .stories } label: { Image(systemName: "rectangle.stack").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.help("Must-say").accessibilityLabel("Must-say")
+                    Button { state.detail = state.detail == .notes ? nil : .notes } label: { Image(systemName: "square.and.pencil").frame(width: 30, height: 30).foregroundStyle(state.detail == .notes ? Color.primary : Color.secondary) }.hoverHint("Notes").accessibilityLabel("Notes")
+                    Button { state.detail = state.detail == .stories ? nil : .stories } label: { Image(systemName: "note.text").frame(width: 30, height: 30).foregroundStyle(state.detail == .stories ? Color.primary : Color.secondary) }.hoverHint("Cue cards").accessibilityLabel("Cue cards")
                 }.buttonStyle(QuietButtonStyle())
                 if state.activeCallID != nil { Button("End call") { Task { await state.endCall() } }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(state.callEnding) }
                 Button { if state.activeCallID != nil { state.windows.showHUD() } else { state.showCallSetup = true } } label: {
@@ -128,25 +149,27 @@ struct MainView: View {
                     } }
                 }.frame(height: call.composerAttachments.contains(where: \.isImage) ? 50 : 40)
             }
-            HStack(alignment: .bottom, spacing: 9) {
-                Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach images, PDFs, or text")
-                ZStack(alignment: .topLeading) {
-                    if state.composer.isEmpty { Text("Ask anything, or add context…").font(.system(size: 14)).foregroundStyle(.secondary.opacity(0.7)).padding(.top, 7).padding(.leading, 5).allowsHitTesting(false) }
-                    ComposerEditor(text: $state.composer, height: $composerHeight, focused: $composerFocused, onSubmit: { state.send() }, onImage: state.attachImage, onFiles: { state.attachFiles($0) }).frame(height: composerHeight)
+            VStack(spacing: 2) {
+                HStack(alignment: .bottom, spacing: 9) {
+                    Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach images, PDFs, or text")
+                    ZStack(alignment: .topLeading) {
+                        if state.composer.isEmpty { Text("Ask anything, or add context…").font(.system(size: 14)).foregroundStyle(.secondary.opacity(0.7)).padding(.top, 7).padding(.leading, 5).allowsHitTesting(false) }
+                        ComposerEditor(text: $state.composer, height: $composerHeight, focused: $composerFocused, onSubmit: { state.send() }, onImage: state.attachImage, onFiles: { state.attachFiles($0) }).frame(height: composerHeight)
+                    }
+                    Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
+                        Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.black).frame(width: 32, height: 32)
+                            .background(OblivionStyle.accent, in: Circle())
+                            .contentTransition(.symbolEffect(.replace))
+                    }.buttonStyle(.plain).opacity(state.isBusy || state.canSend ? 1 : 0.3)
+                        .disabled(!state.isBusy && !state.canSend).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")
                 }
-                Button { if state.isBusy { state.cancelChat() } else { state.send() } } label: {
-                    Image(systemName: state.isBusy ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.black).frame(width: 32, height: 32)
-                        .background(OblivionStyle.accent, in: Circle())
-                        .contentTransition(.symbolEffect(.replace))
-                }.buttonStyle(.plain).opacity(state.isBusy || state.canSend ? 1 : 0.3)
-                    .disabled(!state.isBusy && !state.canSend).accessibilityLabel(state.isBusy ? "Stop response" : "Send message").help("Send with Codex · Return")
+                ChatModelControls(service: state.codex)
             }.padding(10)
                 .background(OblivionStyle.raised, in: RoundedRectangle(cornerRadius: 24))
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(composerFocused ? 0.18 : 0.07), lineWidth: 0.7))
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: composerFocused)
-            ChatModelControls(service: state.codex)
             if state.activeCallID != nil { CaptureStatusCaption(audio: state.audio, active: true, starting: state.callStarting, ending: state.callEnding) }
         }.frame(maxWidth: 760).padding(.horizontal, 30).padding(.bottom, 24).padding(.top, 12).frame(maxWidth: .infinity)
     }
@@ -171,9 +194,13 @@ private struct ConversationView: View, Equatable {
             && lhs.busy == rhs.busy && lhs.status == rhs.status
     }
     var body: some View {
-        NativeConversationView(callID: callID, messages: messages, library: library,
-                               busy: busy, status: status, save: save)
-            .frame(maxWidth: 830).frame(maxWidth: .infinity)
+        let visible = messages.first?.role == "assistant" && messages.first?.text == Prompts.intake ? Array(messages.dropFirst()) : messages
+        if visible.isEmpty && !busy { CallWelcome().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        else {
+            NativeConversationView(callID: callID, messages: visible, library: library,
+                                   busy: busy, status: status, save: save)
+                .frame(maxWidth: 830).frame(maxWidth: .infinity)
+        }
     }
 }
 

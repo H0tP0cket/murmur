@@ -109,7 +109,7 @@ struct MarkdownBody: View, Equatable {
                     if column > 0 { result.append(NSAttributedString(string: "\n", attributes: attributes)) }
                     var heading = attributes
                     heading[.font] = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
-                    result.append(inline(block.rows[0][column] + ": ", attributes: heading))
+                    result.append(inline(block.rows[0][column] + "\n", attributes: heading))
                 }
                 let content = value.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
                 result.append(inline(content, attributes: attributes))

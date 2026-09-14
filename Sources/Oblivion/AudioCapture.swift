@@ -53,7 +53,7 @@ final class SpeechPipeline {
                     guard let self, !Task.isCancelled else { return }
                     self.onResult(SpeechUpdate(source: source, text: String(result.text.characters), start: result.range.start.seconds, end: CMTimeRangeGetEnd(result.range).seconds, isFinal: result.isFinal))
                 }
-            } catch { if !Task.isCancelled { self?.onError("Transcription interrupted: \(error.localizedDescription)") } }
+            } catch { if !Task.isCancelled { self?.onError("Transcription interrupted. \(error.localizedDescription)") } }
         }
         do {
             try await analyzer.prepareToAnalyze(in: format)
@@ -89,7 +89,7 @@ final class SpeechPipeline {
                 consumed = true; inputStatus.pointee = .haveData; return buffer
             }
             guard status != .error, error == nil, output.frameLength > 0 else {
-                if let error { onError("Audio conversion failed: \(error.localizedDescription)") }
+                if let error { onError("Audio conversion failed. \(error.localizedDescription)") }
                 return
             }
             converted = output

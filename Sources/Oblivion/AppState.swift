@@ -65,12 +65,12 @@ final class AppState: ObservableObject {
     private var lastCoach = Date.distantPast
     private var lastSave = Date.distantPast
     private var noteSaveTasks: [UUID: Task<Void, Never>] = [:]
-    enum Detail: String, CaseIterable { case notes = "Notes", transcript = "Transcript", stories = "Must-say" }
+    enum Detail: String, CaseIterable { case notes = "Notes", transcript = "Transcript", stories = "Cue cards" }
 
     init(root: URL? = nil, connect: Bool = true, codex: CodexService? = nil) {
         self.codex = codex ?? CodexService()
         do { library = try LibraryStore(root: root) }
-        catch { fatalError("Could not open the Oblivion library: \(error.localizedDescription)") }
+        catch { fatalError("Could not open the Oblivion library. \(error.localizedDescription)") }
         do {
             calls = try library.load()
             if !library.loadWarnings.isEmpty { self.error = library.loadWarnings.joined(separator: "\n") }
@@ -112,8 +112,7 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult func newCall() -> UUID {
-        var call = CallRecord(prepModel: UserDefaults.standard.string(forKey: "prepModel").flatMap { $0.isEmpty ? nil : $0 }, prepEffort: UserDefaults.standard.string(forKey: "prepEffort").flatMap { $0.isEmpty ? nil : $0 }, automaticTitlePending: true)
-        call.messages = [ChatMessage(role: "assistant", text: Prompts.intake)]
+        let call = CallRecord(prepModel: UserDefaults.standard.string(forKey: "prepModel").flatMap { $0.isEmpty ? nil : $0 }, prepEffort: UserDefaults.standard.string(forKey: "prepEffort").flatMap { $0.isEmpty ? nil : $0 }, automaticTitlePending: true)
         calls.insert(call, at: 0); selectedID = call.id; composer = ""; detail = nil; showArchived = false
         persist(call.id)
         return call.id
@@ -265,7 +264,7 @@ final class AppState: ObservableObject {
             } catch {
                 stream.finish()
                 self.error = error.localizedDescription
-                modify(id) { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].interrupted = true; record.messages[index].pending = false; if record.messages[index].text.isEmpty { record.messages[index].text = "I couldn’t finish this response. Your message is saved—reconnect and try again." } } }
+                modify(id) { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].interrupted = true; record.messages[index].pending = false; if record.messages[index].text.isEmpty { record.messages[index].text = "I couldn’t finish this response. Your message is saved. Reconnect and try again." } } }
             }
         }
     }
@@ -338,18 +337,21 @@ final class AppState: ObservableObject {
         editingStory = nil; detail = .stories
     }
 
-    func updateNotes(callID: UUID? = nil) {
-        guard let id = callID ?? selectedID, let call = calls.first(where: { $0.id == id }), !notesBusy.contains(id) else { return }
+    func updateNotes(callID: UUID? = nil, ifNeeded: Bool = false) {
+        guard let id = callID ?? selectedID, let call = calls.first(where: { $0.id == id }), !notesBusy.contains(id), NotesGeneration.hasMaterial(call) else { return }
+        let signature = NotesGeneration.signature(call)
+        if ifNeeded, (!call.generatedNotes.isEmpty && call.generatedNotesSource == signature)
+            || (call.suggestedNotes != nil && call.suggestedNotesSource == signature) { return }
         notesBusy.insert(id); lastNotes = Date(); notesRevision = transcriptRevision
         let baseline = call.generatedNotes
         Task {
             defer { notesBusy.remove(id) }
             do {
                 let thread = try await codex.thread(cwd: library.directory(id), ephemeral: true)
-                let result = try await codex.run(threadID: thread, text: "Organize concise meeting notes under Key findings, Pain points, People / systems, and Follow-ups. Ground every item in the supplied material. Keep unresolved questions distinct from facts. Preserve the user's existing corrections and do not repeat items. Do not use tools.\n\nEXISTING NOTES:\n\(baseline)\n\n\(call.preparationText)\n\nTRANSCRIPT:\n\(call.transcriptText)", live: true)
+                let result = try await codex.run(threadID: thread, text: NotesGeneration.prompt(call), live: true)
                 modify(id) { record in
-                    if record.generatedNotesEdited == true || record.generatedNotes != baseline { record.suggestedNotes = result }
-                    else { record.generatedNotes = result }
+                    if record.generatedNotesEdited == true || record.generatedNotes != baseline { record.suggestedNotes = result; record.suggestedNotesSource = signature }
+                    else { record.generatedNotes = result; record.generatedNotesSource = signature }
                 }
             } catch { self.error = error.localizedDescription }
         }
@@ -365,7 +367,7 @@ final class AppState: ObservableObject {
 
     func useStory(_ story: PreparedStory) {
         pendingRecommendation = nil; recommendationPinned = true
-        recommendation = Recommendation(kind: "MUST-SAY", coaching: "Your exact wording. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
+        recommendation = Recommendation(kind: "CUE CARD", coaching: "Your exact wording. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
     }
 
     func startCall(popOut: Bool = true) async {
@@ -483,7 +485,7 @@ final class AppState: ObservableObject {
                 }
                 coachTurns += 1; coachedRevision = revision; coachSentTranscript = call.transcript; coachingStatus = ""
             } catch is CancellationError { }
-            catch { if activeSession == sessionID { coachingStatus = "Coaching paused: \(error.localizedDescription)"; coachThread = nil } }
+            catch { if activeSession == sessionID { coachingStatus = "Coaching paused. \(error.localizedDescription)"; coachThread = nil } }
         }
     }
 

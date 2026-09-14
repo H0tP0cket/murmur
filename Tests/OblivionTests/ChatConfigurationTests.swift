@@ -129,6 +129,9 @@ import Testing
     #expect(first["model"] as? String == "model-a" && first["effort"] as? String == "high")
     #expect(last["model"] as? String == "model-b" && last["effort"] as? String == "low")
     #expect(requests.contains { $0["method"] as? String == "thread/resume" })
+    let threads = requests.filter { ["thread/start", "thread/resume"].contains($0["method"] as? String ?? "") }
+    #expect(threads.count == 2)
+    #expect(threads.allSatisfy { ($0["params"] as? [String: Any])?["developerInstructions"] as? String == Prompts.outputStyle })
     let inputs = try #require(first["input"] as? [[String: Any]])
     #expect(inputs.filter { $0["type"] as? String == "localImage" }.count == 1)
     #expect(inputs.last?["path"] as? String == state.library.imageURL(sent, callID: id)?.path)

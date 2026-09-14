@@ -134,14 +134,14 @@ struct HUDView: View {
             Divider().opacity(0.5)
             HStack(spacing: 17) {
                 Button { state.windows.returnToChat() } label: { Label("Chat", systemImage: "arrow.down.left") }.help("Return to chat · ⌘⇧X")
-                Button { state.windows.showCallNotes() } label: { Label("Notes", systemImage: "note.text") }.help("Open chat and notes while keeping live guidance visible").accessibilityLabel("Open call notes")
+                Button { state.windows.showCallNotes() } label: { Label("Notes", systemImage: "square.and.pencil") }.help("Open chat and notes while keeping live guidance visible").accessibilityLabel("Open call notes")
                 Button { state.windows.ask() } label: { Label("Ask", systemImage: "sparkle") }.help("Ask copilot · ⌘K")
                 Button { state.recommendationPinned = false; state.requestCoaching(force: true) } label: { Image(systemName: "arrow.clockwise") }.disabled(state.coachingBusy).help("Get another recommendation")
                 Menu {
                     Button(state.recommendationPinned ? "Unpin answer" : "Pin this answer") { state.recommendationPinned.toggle() }
                     Divider()
                     ForEach(state.activeCall?.stories.filter(\.approved) ?? []) { story in Button(story.displayTitle) { state.useStory(story) } }
-                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "rectangle.stack") }.menuStyle(.borderlessButton).fixedSize().help("Must-say · available offline")
+                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "note.text") }.menuStyle(.borderlessButton).fixedSize().help("Cue cards · available offline")
                 Spacer()
                 AudioLevelsView(audio: state.audio)
                 Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)

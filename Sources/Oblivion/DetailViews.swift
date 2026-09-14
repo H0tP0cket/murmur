@@ -11,7 +11,18 @@ struct DetailView: View {
     @State private var showingAINotes = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Text(detail.rawValue).font(.system(size: 14, weight: .semibold)); Spacer(); Button { state.detail = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(.secondary) }.padding(20)
+            HStack(spacing: 10) {
+                Text(detail.rawValue).font(.system(size: 14, weight: .semibold))
+                if detail == .transcript {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search", text: $search).textFieldStyle(.plain).accessibilityLabel("Search transcript")
+                    }.font(.system(size: 12)).padding(8)
+                        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                } else { Spacer() }
+                Button { state.detail = nil } label: { Image(systemName: "xmark").frame(width: 22, height: 26) }
+                    .buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).help("Close sidebar")
+            }.padding(20)
             if let call = state.selected {
                 switch detail {
                 case .notes: notes(call)
@@ -29,14 +40,8 @@ struct DetailView: View {
     }
 
     private func notes(_ call: CallRecord) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Picker("Notes view", selection: $showingAINotes) {
-                Text("Your notes").tag(false)
-                Text("AI notes").tag(true)
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 20)
-            if showingAINotes {
-                generatedNotes(call)
-            } else {
+        VSplitView {
+            VStack(alignment: .leading, spacing: 12) {
                 PersonalNotesEditor(callID: call.id).padding(.horizontal, 20)
                 HStack {
                     Text("Saved with this call").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -44,28 +49,45 @@ struct DetailView: View {
                     Button("Ask about notes") { state.composer = "Reference my notes. What should I focus on next?" }
                         .buttonStyle(.bordered).controlSize(.small).font(.system(size: 11))
                 }.padding(.horizontal, 20).padding(.bottom, 18)
+            }.frame(minHeight: 180, maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button { showingAINotes.toggle() } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: showingAINotes ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold))
+                            Text("AI notes").font(.system(size: 12, weight: .medium))
+                        }.padding(6).contentShape(Rectangle())
+                    }.buttonStyle(QuietButtonStyle()).accessibilityLabel("AI notes").accessibilityValue(showingAINotes ? "Expanded" : "Collapsed")
+                    Spacer()
+                    if state.notesBusy.contains(call.id) { ProgressView().controlSize(.small) }
+                }.padding(.horizontal, 14).padding(.top, 6)
+                if showingAINotes { generatedNotes(call) }
             }
+            .frame(minHeight: showingAINotes ? 160 : 40, idealHeight: showingAINotes ? 280 : 40, maxHeight: showingAINotes ? .infinity : 40)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: showingAINotes) { _, expanded in
+                if expanded { state.updateNotes(callID: call.id, ifNeeded: true) }
+            }
     }
 
     private func generatedNotes(_ call: CallRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 10) {
-                    Text("FROM YOUR CONVERSATION").font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
+                    Text(call.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "From the conversation" : "Guided by your notes").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
                     if !call.generatedNotes.isEmpty { Button(editingNotes ? "Done" : "Edit") { editingNotes.toggle() }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary) }
-                    Button { state.updateNotes(callID: call.id) } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).font(.system(size: 11)).help("Update call notes").accessibilityLabel("Update call notes").disabled(state.notesBusy.contains(call.id))
+                    Button { state.updateNotes(callID: call.id) } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).font(.system(size: 11)).help("Update AI notes from the latest conversation and your notes").accessibilityLabel("Update call notes").disabled(state.notesBusy.contains(call.id) || !NotesGeneration.hasMaterial(call))
                 }
-                if call.generatedNotes.isEmpty { Text("Findings, open questions, and follow-ups will appear here. Your own notes stay in Your notes.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4) }
+                if call.generatedNotes.isEmpty { Text(state.notesBusy.contains(call.id) ? "Writing your AI notes…" : "Add some context, write a note, or start your call. Your AI summary will live here.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4) }
                 else if editingNotes { TextEditor(text: Binding(get: { state.calls.first(where: { $0.id == call.id })?.generatedNotes ?? "" }, set: { state.editNotes(callID: call.id, text: $0, generated: true) })).font(.system(size: 13)).scrollContentBackground(.hidden).frame(minHeight: 320).accessibilityLabel("Edit call notes") }
                 else { MarkdownBody(text: call.generatedNotes, fontSize: 13).equatable() }
                 if let suggestion = call.suggestedNotes {
                     DisclosureGroup("Updated notes ready") {
                         Text(suggestion).font(.system(size: 12)).textSelection(.enabled).padding(.vertical, 8)
                         HStack {
-                            Button("Replace call notes") { state.modify(call.id) { $0.generatedNotes = suggestion; $0.suggestedNotes = nil; $0.generatedNotesEdited = false } }
-                            Button("Dismiss") { state.modify(call.id) { $0.suggestedNotes = nil } }
+                            Button("Replace call notes") { state.modify(call.id) { $0.generatedNotes = suggestion; $0.generatedNotesSource = $0.suggestedNotesSource; $0.suggestedNotes = nil; $0.suggestedNotesSource = nil; $0.generatedNotesEdited = false } }
+                            Button("Dismiss") { state.modify(call.id) { $0.suggestedNotes = nil; $0.suggestedNotesSource = nil } }
                         }.font(.system(size: 11))
                     }
                     Text("Your edits are preserved until you accept an update.").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -78,8 +100,8 @@ struct DetailView: View {
     private func stories(_ call: CallRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("The words you want to get right. Intros, questions, pitches, and answers — ready verbatim when the moment fits.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
-                Button { state.editingStory = PreparedStory(title: "", body: "") } label: { Label("Add must-say", systemImage: "plus") }.controlSize(.small)
+                Text("The words you want to get right. Intros, questions, pitches, and answers, ready verbatim when the moment fits.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+                Button { state.editingStory = PreparedStory(title: "", body: "") } label: { Label("Add cue card", systemImage: "plus") }.controlSize(.small)
                 ForEach(call.stories) { story in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { Text("WHEN TO USE").font(.system(size: 9, weight: .semibold)).tracking(0.7).foregroundStyle(.tertiary); Spacer(); if !story.approved { Text("Draft").font(.system(size: 10)).foregroundStyle(.secondary) } }
@@ -94,7 +116,6 @@ struct DetailView: View {
 
     private func transcript(_ call: CallRecord) -> some View {
         VStack(spacing: 12) {
-            HStack { Image(systemName: "magnifyingglass"); TextField("Search transcript", text: $search).textFieldStyle(.plain) }.font(.system(size: 12)).padding(9).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9)).padding(.horizontal, 18)
             if call.transcript.isEmpty {
                 ContentUnavailableView("Your conversation, captured", systemImage: "waveform", description: Text("Start a call to transcribe on this Mac, or import a transcript."))
                 Button("Import transcript…") { state.importTranscript() }.padding(.bottom, 20)
@@ -107,7 +128,7 @@ struct DetailView: View {
                                     .font(.system(size: 10)).foregroundStyle(.secondary)
                                 Text(segment.text).font(.system(size: 13)).lineSpacing(4).textSelection(.enabled).foregroundStyle(segment.isFinal ? .primary : .secondary)
                                 HStack {
-                                    Button("Ask about this") { state.composer = "Help me understand this part of the call [\(segment.timestamp), \(segment.speaker)]:\n\"\(segment.text)\"" }
+                                    Button("Ask about this") { state.composer = "Help me understand this part of the call [\(segment.timestamp), \(segment.speaker)]\n\"\(segment.text)\"" }
                                     Button("Edit") { editingSegment = segment }
                                     if segment.correction != nil { Text("Edited").foregroundStyle(.tertiary) }
                                 }.buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
@@ -118,7 +139,7 @@ struct DetailView: View {
                 }.defaultScrollAnchor(.bottom)
                 HStack { Text("\(call.transcript.count) passages"); Spacer(); Button("Export") { state.exportCall() } }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 15)
             }
-        }.frame(maxHeight: .infinity)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -148,11 +169,11 @@ struct StoryEditor: View {
     @State var story: PreparedStory
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Must-say").font(.title2.weight(.semibold))
-            Text("Give this wording a moment. Oblivion will match the situation or meaning and show exactly what you saved.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+            Text("Cue card").font(.title2.weight(.semibold))
+            Text("Describe the situation or the kind of question they might ask. Oblivion matches the meaning and shows your saved wording exactly.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
             VStack(alignment: .leading, spacing: 8) {
                 Text("When to use it").font(.system(size: 12, weight: .medium))
-                TextField("e.g. At the start, or when they ask me to introduce myself", text: $story.cues, axis: .vertical)
+                TextField("When they ask about a time I solved a difficult challenge", text: $story.cues, axis: .vertical)
                     .lineLimit(2...4).textFieldStyle(.plain).font(.system(size: 13)).padding(12)
                     .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(.primary.opacity(0.09)))
@@ -189,7 +210,7 @@ struct TranscriptEditor: View {
             Text("Edit transcript · \(segment.timestamp)").font(.title2.weight(.semibold))
             TextField("Speaker", text: $speaker).textFieldStyle(.roundedBorder)
             TextEditor(text: $text).font(.system(size: 14)).frame(height: 180).padding(8).overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.1)))
-            Text("Original: \(segment.original)").font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Original\n\(segment.original)").font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Restore original") { text = segment.original }; Spacer(); Button("Save") { save(text, speaker); dismiss() }.keyboardShortcut(.defaultAction) }
         }.padding(24).frame(width: 520).onAppear { text = segment.text; speaker = segment.speaker }
     }
@@ -234,6 +255,7 @@ struct SettingsView: View {
                 Section("Personal context") {
                     Text("Your background, preferred introduction, and facts you want available across calls.").font(.system(size: 12)).foregroundStyle(.secondary)
                     TextEditor(text: $background).font(.system(size: 13)).frame(height: 100)
+                    PersonalContextHelper()
                 }
                 Section("Codex") {
                     CodexStatusView(service: state.codex)

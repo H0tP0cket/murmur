@@ -7,7 +7,7 @@ A native macOS copilot for better conversations. Prepare in a chat, get live coa
 - Free-form preparation with images, PDFs, text, links, and research.
 - Per-chat model and reasoning effort controls, with buffered replies and selectable tables.
 - Automatic person + company/role chat names, with manual renaming.
-- A floating HUD with one next recommendation, exact Must-say wording, and quick private questions.
+- A floating HUD with one next recommendation, exact saved wording, and quick private questions.
 - On-device transcription of microphone and meeting audio.
 - Searchable, editable transcripts and notes attached to each conversation.
 - SwiftUI + AppKit, a monochrome dark interface, and a glass sidebar.
@@ -27,11 +27,15 @@ Quit Oblivion before reinstalling. Launch the installed copy in `~/Applications`
 
 Use **+** to attach files, or paste screenshots and copied image files into the composer. Sent images leave the composer and stay on their original message; the × removes an unsent attachment. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
 
-Choose the model and reasoning effort below the composer. Choices are saved per chat and apply to its next reply. Replies appear in coherent chunks; Copy keeps the original Markdown, including tables.
+Edit the chat name directly in the header. Return or clicking away saves it, and Escape cancels. Both sidebars slide open and closed, and the header icons show a short label after half a second of hovering.
 
-**Save for call** opens **Must-say** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing prepared answers remain available. This is priority context, not a separate model cache or a guarantee of perfect matching.
+Choose the model and reasoning effort inside the composer. The controls highlight on hover and flip their arrows while a menu is open. Choices are saved per chat and apply to its next reply. Replies appear in coherent chunks; Copy keeps the original Markdown, including tables.
 
-**Notes** opens a full-height personal notepad. In the pop-out HUD, **Notes** reopens the active call in the main app with its notes sidebar while keeping live guidance visible. You can take notes, use the chat, and reference earlier context together. **Pop out** returns to the overlay alone; the hide shortcut toggles just the overlay. Your notes are saved with the call and included when you ask the chat to reference them. The **AI notes** tab keeps generated findings, edits, and updates separate.
+In **Settings → Personal context**, expand **Build your context with ChatGPT** and copy the prompt to generate a factual first-person summary. Paste the result into your personal context to make it available across calls.
+
+**Save for call** opens **Cue cards** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing saved wording remains available. This is priority context, not a separate model cache or a guarantee of perfect matching.
+
+**Notes** opens a full-height personal notepad. In the pop-out HUD, **Notes** reopens the active call in the main app with its notes sidebar while keeping live guidance visible. You can take notes, use the chat, and reference earlier context together. **Pop out** returns to the overlay alone; the hide shortcut toggles just the overlay. Your notes are saved with the call and included when you ask the chat to reference them. Drag the panel edge to widen the notepad. Expand **AI notes** below it, and drag the horizontal divider to choose how much space each gets. AI notes use the conversation by default or follow your written notes when present. Opening the section refreshes changed source material; **Update** refreshes it on demand. Manual edits remain protected until you accept a proposed replacement.
 
 Chats, attachments, and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text and attached images are sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
 

@@ -158,8 +158,10 @@ struct NativeConversationView: NSViewRepresentable {
         }
 
         private func action(_ text: String, kind: String, id: UUID) -> NSAttributedString {
-            // Text reserves space; only visible actions get real native buttons.
-            let value = NSMutableAttributedString(attributedString: label("   \(text)   ", size: 11))
+            // A blank attachment reserves space without selectable button words.
+            let spacer = NSTextAttachment()
+            spacer.attachmentCell = ActionSpacerCell(title: text)
+            let value = NSMutableAttributedString(attachment: spacer)
             let paragraph = NSMutableParagraphStyle()
             paragraph.minimumLineHeight = 30
             paragraph.paragraphSpacingBefore = 8
@@ -272,6 +274,64 @@ final class ChatDocumentView: NSTextView {
     var onAction: ((URL) -> Void)?
     private(set) var actionButtons: [URL: ChatActionButton] = [:]
     private var actionLayoutScheduled = false
+    private var selectionObserver: NSObjectProtocol?
+    private var ownedTextStorage: NSTextStorage?
+
+    override init(frame frameRect: NSRect, textContainer container: NSTextContainer? = nil) {
+        var container = container
+        if container == nil {
+            let storage = NSTextStorage()
+            let layout = NSLayoutManager()
+            let textContainer = NSTextContainer(size: NSSize(width: frameRect.width, height: .greatestFiniteMagnitude))
+            storage.addLayoutManager(layout)
+            layout.addTextContainer(textContainer)
+            ownedTextStorage = storage
+            container = textContainer
+        }
+        super.init(frame: frameRect, textContainer: container)
+        if ownedTextStorage != nil {
+            isVerticallyResizable = true
+            isHorizontallyResizable = false
+            minSize = frameRect.size
+            maxSize = NSSize(width: frameRect.width, height: .greatestFiniteMagnitude)
+            container?.widthTracksTextView = true
+        }
+        selectedTextAttributes = [.backgroundColor: NSColor(white: 0.32, alpha: 1), .foregroundColor: NSColor.labelColor]
+        focusRingType = .none
+        selectionObserver = NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: self, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            // Invalidate the whole viewport, including blank paragraph/table
+            // regions AppKit can miss when a selection is shortened or cleared.
+            self.setNeedsDisplay(self.visibleRect)
+            let selecting = self.selectedRanges.contains { $0.rangeValue.length > 0 }
+            for button in self.actionButtons.values { button.isHidden = selecting }
+            self.window?.invalidateCursorRects(for: self)
+            self.scheduleActionLayout()
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    deinit { if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) } }
+
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard [.string, .rtf, .rtfd].contains(type), let textStorage else { return super.writeSelection(to: pboard, type: type) }
+        let content = NSMutableAttributedString(string: "")
+        for value in selectedRanges {
+            let range = value.rangeValue
+            guard range.length > 0, NSMaxRange(range) <= textStorage.length else { continue }
+            let selected = NSMutableAttributedString(attributedString: textStorage.attributedSubstring(from: range))
+            var actions: [NSRange] = []
+            selected.enumerateAttribute(.oblivionAction, in: NSRange(location: 0, length: selected.length)) { value, range, _ in
+                if value != nil { actions.append(range) }
+            }
+            for range in actions.reversed() { selected.deleteCharacters(in: range) }
+            if content.length > 0 { content.append(NSAttributedString(string: "\n")) }
+            content.append(selected)
+        }
+        if type == .string { return pboard.setString(content.string, forType: .string) }
+        let documentType: NSAttributedString.DocumentType = type == .rtfd ? .rtfd : .rtf
+        guard let data = try? content.data(from: NSRange(location: 0, length: content.length), documentAttributes: [.documentType: documentType]) else { return false }
+        return pboard.setData(data, forType: type)
+    }
 
     func scheduleActionLayout() {
         guard !actionLayoutScheduled else { return }
@@ -321,7 +381,7 @@ final class ChatDocumentView: NSTextView {
 
     override func accessibilityChildren() -> [Any]? {
         // NSTextView exposes its text links, but not embedded NSButton subviews.
-        (super.accessibilityChildren() ?? []) + actionButtons.values.sorted {
+        (super.accessibilityChildren() ?? []) + actionButtons.values.filter { !$0.isHidden }.sorted {
             $0.frame.minY == $1.frame.minY ? $0.frame.minX < $1.frame.minX : $0.frame.minY < $1.frame.minY
         }
     }
@@ -333,6 +393,7 @@ final class ChatDocumentView: NSTextView {
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         var visible = Set<URL>()
         var geometryChanged = false
+        let selecting = selectedRanges.contains { $0.rangeValue.length > 0 }
         textStorage.enumerateAttribute(.oblivionAction, in: characters) { value, range, _ in
             guard let url = value as? URL else { return }
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -345,7 +406,7 @@ final class ChatDocumentView: NSTextView {
             else {
                 button = ChatActionButton(frame: .zero)
                 button.title = url.host == "save" ? "Save for call" : "Copy"
-                button.toolTip = url.host == "save" ? "Edit and save this response to Must-say" : "Copy the full Markdown response"
+                button.toolTip = url.host == "save" ? "Edit and save this response to Cue cards" : "Copy the full Markdown response"
                 button.onPress = { [weak self, weak button] in
                     self?.onAction?(url)
                     if url.host == "copy" { button?.showCopied() }
@@ -353,6 +414,7 @@ final class ChatDocumentView: NSTextView {
                 actionButtons[url] = button; addSubview(button); geometryChanged = true
             }
             if button.frame != frame { button.frame = frame; geometryChanged = true }
+            if button.isHidden != selecting { button.isHidden = selecting; geometryChanged = true }
         }
         for url in Array(actionButtons.keys) where !visible.contains(url) {
             actionButtons.removeValue(forKey: url)?.removeFromSuperview()
@@ -363,12 +425,12 @@ final class ChatDocumentView: NSTextView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for button in actionButtons.values { addCursorRect(button.frame, cursor: .pointingHand) }
+        for button in actionButtons.values where !button.isHidden { addCursorRect(button.frame, cursor: .pointingHand) }
     }
 
     override func cursorUpdate(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if actionButtons.values.contains(where: { $0.frame.contains(point) }) { NSCursor.pointingHand.set() }
+        if actionButtons.values.contains(where: { !$0.isHidden && $0.frame.contains(point) }) { NSCursor.pointingHand.set() }
         else { super.cursorUpdate(with: event) }
     }
 
@@ -394,6 +456,19 @@ final class ChatDocumentView: NSTextView {
             NSBezierPath(roundedRect: bubbleRect(for: message), xRadius: 16, yRadius: 16).fill()
         }
     }
+}
+
+/// Invisible geometry only. AppKit selection cannot reveal a second label.
+private final class ActionSpacerCell: NSTextAttachmentCell {
+    private let size: NSSize
+    init(title: String) {
+        size = NSSize(width: max(46, ceil((title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]).width) + 18), height: 30)
+        super.init(textCell: "")
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func cellSize() -> NSSize { size }
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {}
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int, layoutManager: NSLayoutManager) {}
 }
 
 /// A small neutral pill with native button semantics, cursor and press feedback.

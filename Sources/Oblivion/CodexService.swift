@@ -112,11 +112,11 @@ final class CodexService: ObservableObject {
         try await connect()
         try Task.checkCancellation()
         if let existing {
-            _ = try await request("thread/resume", ["threadId": existing, "cwd": cwd.path])
+            _ = try await request("thread/resume", ["threadId": existing, "cwd": cwd.path, "developerInstructions": Prompts.outputStyle])
             try Task.checkCancellation()
             return existing
         }
-        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": instructions ?? (live ? Prompts.coach : Prompts.assistant), "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
+        var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": instructions ?? (live ? Prompts.coach : Prompts.assistant), "developerInstructions": Prompts.outputStyle, "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
         if let model = try turnSelection(live: live, modelOverride: modelOverride).model { params["model"] = model }
         let result = try await request("thread/start", params)
         guard let id = (result["thread"] as? [String: Any])?["id"] as? String else { throw OblivionError.message("Codex didn’t return a conversation.") }

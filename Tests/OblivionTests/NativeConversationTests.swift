@@ -121,3 +121,55 @@ import Testing
     #expect(text.string.contains(longPrompt))
     #expect(text.selectedRange() == selected)
 }
+
+@Test @MainActor func selectionHidesActionsAndCopiesOnlyConversationContent() throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("oblivion-selection-actions-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let library = try LibraryStore(root: root)
+    let scroll = ChatScrollView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+    let text = ChatDocumentView(frame: NSRect(x: 0, y: 0, width: 680, height: 500))
+    text.isEditable = false; text.isSelectable = true; text.isVerticallyResizable = true
+    text.textContainer?.widthTracksTextView = true
+    scroll.documentView = text
+    let coordinator = NativeConversationView.Coordinator(); coordinator.textView = text
+    let answer = ChatMessage(role: "assistant", text: "## Next step\n\nA complete answer.\n\n| Trigger | Wording |\n|---|---|\n| Challenge | My exact story |")
+    coordinator.update(NativeConversationView(callID: UUID(), messages: [ChatMessage(role: "user", text: "Help me prepare"), answer], library: library, busy: false, status: "", save: { _ in }))
+    text.layoutManager?.ensureLayout(for: text.textContainer!); text.sizeToFit(); text.layoutActionButtons()
+    #expect(text.actionButtons.count == 2)
+    #expect(text.actionButtons.values.allSatisfy { !$0.isHidden })
+    #expect(!text.string.contains("Copy"))
+    #expect(!text.string.contains("Save for call"))
+    text.selectAll(nil)
+    #expect(text.actionButtons.values.allSatisfy { $0.isHidden })
+    let board = NSPasteboard.withUniqueName()
+    defer { board.releaseGlobally() }
+    #expect(text.writeSelection(to: board, type: .string))
+    let copied = try #require(board.string(forType: .string))
+    #expect(copied.contains("Help me prepare"))
+    #expect(copied.contains("My exact story"))
+    #expect(!copied.contains("\u{fffc}"))
+    #expect(!copied.contains("Save for call"))
+    #expect(text.writeSelection(to: board, type: .rtf))
+    let richData = try #require(board.data(forType: .rtf))
+    let rich = try NSAttributedString(data: richData, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+    #expect(rich.string.contains("My exact story"))
+    #expect(!rich.string.contains("\u{fffc}"))
+    let color = try #require((text.selectedTextAttributes[.backgroundColor] as? NSColor)?.usingColorSpace(.deviceRGB))
+    #expect(abs(color.redComponent - color.blueComponent) < 0.001)
+    text.setSelectedRange(NSRange(location: 0, length: 0))
+    #expect(text.actionButtons.values.allSatisfy { !$0.isHidden })
+}
+
+@Test @MainActor func chatChoiceTracksOpenStateAndFitsLabel() {
+    let button = ChatChoiceButton(frame: NSRect(x: 0, y: 0, width: 150, height: 28))
+    button.title = "GPT-6-Astra"
+    #expect(button.intrinsicContentSize.width > 85)
+    #expect(button.intrinsicContentSize.height == 28)
+    #expect(!button.menuIsOpen)
+    let menu = NSMenu()
+    button.menuWillOpen(menu)
+    #expect(button.menuIsOpen)
+    button.menuDidClose(menu)
+    #expect(!button.menuIsOpen)
+}
