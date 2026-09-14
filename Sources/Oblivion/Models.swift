@@ -66,6 +66,8 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var updatedAt = Date()
     var archived = false
     var threadID: String?
+    var prepModel: String?
+    var prepEffort: String?
     var messages: [ChatMessage] = []
     var attachments: [Attachment] = []
     var stories: [PreparedStory] = []
@@ -82,6 +84,12 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var unsentImages: [Attachment] {
         let sent = Set(messages.flatMap { $0.images ?? [] }.map(\.id))
         return attachments.filter { $0.isImage && !sent.contains($0.id) }
+    }
+
+    // Documents remain reusable context; sent images live on their message.
+    var composerAttachments: [Attachment] {
+        let pending = Set(unsentImages.map(\.id))
+        return attachments.filter { !$0.isImage || pending.contains($0.id) }
     }
 
     var transcriptText: String {

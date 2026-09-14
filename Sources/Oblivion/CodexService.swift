@@ -5,6 +5,8 @@ final class CodexService: ObservableObject {
     @Published var status = "Connecting…"
     @Published var models: [ModelOption] = []
     @Published var isConnected = false
+    private let executableURL: URL?
+    init(executableURL: URL? = nil) { self.executableURL = executableURL }
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
@@ -18,6 +20,9 @@ final class CodexService: ObservableObject {
         var requestID = UUID()
         var continuation: CheckedContinuation<String, Error>?
         var text = ""
+        var messageOrder: [String] = []
+        var messageText: [String: String] = [:]
+        var messagePhase: [String: String] = [:]
         var turnID: String?
         var cancelled = false
         var queuedEvents: [(String, [String: Any])] = []
@@ -40,7 +45,7 @@ final class CodexService: ObservableObject {
 
     private func start() async throws {
         status = "Connecting…"
-        let candidates = [UserDefaults.standard.string(forKey: "codexPath"), NSHomeDirectory() + "/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex"].compactMap { $0 }
+        let candidates = [executableURL?.path, UserDefaults.standard.string(forKey: "codexPath"), NSHomeDirectory() + "/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex"].compactMap { $0 }
         guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw OblivionError.message("Codex isn’t installed. Set its executable path in Settings.") }
         let proc = Process(), stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         proc.executableURL = URL(fileURLWithPath: path)
@@ -89,7 +94,21 @@ final class CodexService: ObservableObject {
         return preferences.first(where: { name in models.contains { $0.id == name } }) ?? models.first?.id
     }
 
-    func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false, instructions: String? = nil) async throws -> String {
+    /// Resolve against the server's catalog, once per turn. Explicit choices must
+    /// never silently run on another model or send an unsupported effort.
+    func turnSelection(live: Bool = false, modelOverride: String? = nil, effortOverride: String? = nil) throws -> (model: String?, effort: String?) {
+        let selected = modelOverride ?? model(live: live)
+        guard let selected, let option = models.first(where: { $0.id == selected }) else {
+            if modelOverride != nil { throw OblivionError.message("This model is unavailable. Choose another model in the chat.") }
+            return (nil, nil)
+        }
+        let fallback = live ? (["none", "low"].first(where: option.efforts.contains) ?? option.defaultEffort)
+                            : (option.efforts.contains("medium") ? "medium" : option.defaultEffort)
+        let effort = effortOverride.flatMap { option.efforts.contains($0) ? $0 : nil } ?? fallback
+        return (selected, option.efforts.contains(effort) ? effort : option.efforts.first)
+    }
+
+    func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false, instructions: String? = nil, modelOverride: String? = nil) async throws -> String {
         try await connect()
         try Task.checkCancellation()
         if let existing {
@@ -98,18 +117,19 @@ final class CodexService: ObservableObject {
             return existing
         }
         var params: [String: Any] = ["cwd": cwd.path, "approvalPolicy": "never", "sandbox": "workspace-write", "baseInstructions": instructions ?? (live ? Prompts.coach : Prompts.assistant), "ephemeral": live || ephemeral, "config": ["web_search": live ? "disabled" : "live", "project_doc_max_bytes": 0]]
-        if let model = model(live: live) { params["model"] = model }
+        if let model = try turnSelection(live: live, modelOverride: modelOverride).model { params["model"] = model }
         let result = try await request("thread/start", params)
         guard let id = (result["thread"] as? [String: Any])?["id"] as? String else { throw OblivionError.message("Codex didn’t return a conversation.") }
         try Task.checkCancellation()
         return id
     }
 
-    func run(threadID: String, text: String, images: [URL] = [], live: Bool = false, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
+    func run(threadID: String, text: String, images: [URL] = [], live: Bool = false, modelOverride: String? = nil, effortOverride: String? = nil, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
         try Task.checkCancellation()
         guard turns[threadID] == nil else { throw OblivionError.message("This conversation is still responding.") }
-        if !images.isEmpty, let selected = model(live: live), let option = models.first(where: { $0.id == selected }), !option.inputModalities.contains("image") {
-            throw OblivionError.message("\(option.name) doesn’t accept images. Choose an image-capable model in Settings.")
+        let selection = try turnSelection(live: live, modelOverride: modelOverride, effortOverride: effortOverride)
+        if !images.isEmpty, let selected = selection.model, let option = models.first(where: { $0.id == selected }), !option.inputModalities.contains("image") {
+            throw OblivionError.message("\(option.name) doesn’t accept images. Choose an image-capable model in the chat.")
         }
         guard images.allSatisfy({ $0.isFileURL && FileManager.default.isReadableFile(atPath: $0.path) }) else {
             throw OblivionError.message("An attached image is missing. Remove it and attach it again.")
@@ -124,12 +144,8 @@ final class CodexService: ObservableObject {
                     do {
                         let inputs: [[String: Any]] = [["type": "text", "text": text]] + images.map { ["type": "localImage", "path": $0.path] }
                         var params: [String: Any] = ["threadId": threadID, "input": inputs]
-                        if let model = model(live: live) {
-                            params["model"] = model
-                            if let option = models.first(where: { $0.id == model }) {
-                                params["effort"] = live ? (["none", "low"].first(where: option.efforts.contains) ?? option.defaultEffort) : (option.efforts.contains("medium") ? "medium" : option.defaultEffort)
-                            }
-                        }
+                        if let model = selection.model { params["model"] = model }
+                        if let effort = selection.effort { params["effort"] = effort }
                         if let schema { params["outputSchema"] = schema }
                         let result = try await request("turn/start", params)
                         guard turns[threadID] === waiter else { return }
@@ -141,7 +157,7 @@ final class CodexService: ObservableObject {
                     } catch { if turns[threadID] === waiter { finish(threadID, .failure(error)) } }
                 }
                 waiter.timeout = Task { [weak self, weak waiter] in
-                    do { try await Task.sleep(for: .seconds(live ? 60 : 240)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(live ? 60 : (["high", "xhigh", "max", "ultra"].contains(selection.effort ?? "") ? 900 : 240))) } catch { return }
                     guard let self, let waiter else { return }
                     if self.turns[threadID] === waiter {
                         await self.cancel(threadID: threadID)
@@ -224,9 +240,20 @@ final class CodexService: ObservableObject {
         let eventTurnID = params["turnId"] as? String ?? (params["turn"] as? [String: Any])?["id"] as? String
         guard turns[threadID] === waiter, let eventTurnID, eventTurnID == waiter.turnID else { return }
         if method == "item/agentMessage/delta", let delta = params["delta"] as? String {
-                waiter.text += delta; waiter.onText(waiter.text)
-            } else if method == "item/started", let item = params["item"] as? [String: Any], let type = item["type"] as? String, type != "agentMessage", type != "reasoning" {
-                waiter.onStatus(type == "webSearch" ? "Researching…" : "Working with your context…")
+                let itemID = params["itemId"] as? String ?? "legacy"
+                if !waiter.messageOrder.contains(itemID) { waiter.messageOrder.append(itemID) }
+                waiter.messageText[itemID, default: ""] += delta
+                publishMessages(waiter)
+            } else if method == "item/started" || method == "item/completed",
+                      let item = params["item"] as? [String: Any], let type = item["type"] as? String {
+                if type == "agentMessage", let itemID = item["id"] as? String {
+                    if !waiter.messageOrder.contains(itemID) { waiter.messageOrder.append(itemID) }
+                    waiter.messagePhase[itemID] = item["phase"] as? String
+                    if let text = item["text"] as? String { waiter.messageText[itemID] = text }
+                    publishMessages(waiter)
+                } else if method == "item/started", type != "reasoning" {
+                    waiter.onStatus(type == "webSearch" ? "Researching…" : "Working with your context…")
+                }
             } else if method == "turn/completed" {
                 let turn = params["turn"] as? [String: Any] ?? [:]
                 let items = turn["items"] as? [[String: Any]] ?? []
@@ -237,6 +264,15 @@ final class CodexService: ObservableObject {
                 else if (turn["status"] as? String) == "interrupted" || waiter.cancelled { finish(threadID, .failure(CancellationError())) }
                 else { finish(threadID, .success(text.isEmpty ? waiter.text : text)) }
             }
+    }
+
+    private func publishMessages(_ waiter: TurnWaiter) {
+        // Commentary is progress, not part of the answer. Keep separate final
+        // message items separated so headings, tables and paragraphs don't join.
+        let visible = waiter.messageOrder.filter { waiter.messagePhase[$0] != "commentary" }
+        let text = visible.compactMap { waiter.messageText[$0] }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+        guard !text.isEmpty, text != waiter.text else { return }
+        waiter.text = text; waiter.onText(text)
     }
 
     private func finish(_ thread: String, _ result: Result<String, Error>) {

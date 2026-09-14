@@ -114,6 +114,7 @@ struct NativeConversationView: NSViewRepresentable {
 
         private func render(_ message: ChatMessage, index: Int, parent: NativeConversationView) -> NSAttributedString {
             let result = NSMutableAttributedString(string: "")
+            if message.pending == true, message.text.isEmpty { return result }
             for attachment in message.images ?? [] {
                 guard let url = parent.library.imageURL(attachment, callID: parent.callID) else { continue }
                 let token = attachment.id.uuidString

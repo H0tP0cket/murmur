@@ -11,7 +11,8 @@ final class AppState: ObservableObject {
     }
     @Published var composer = ""
     @Published var busyCalls: Set<UUID> = []
-    @Published var chatStatus = ""
+    @Published private var chatStatuses: [UUID: String] = [:]
+    var chatStatus: String { selectedID.flatMap { chatStatuses[$0] } ?? "" }
     @Published var error: String?
     @Published var detail: Detail?
     @Published var sidebarSearch = ""
@@ -36,7 +37,7 @@ final class AppState: ObservableObject {
     @Published var showDirectQuestion = false
     @Published var includeMicrophone = UserDefaults.standard.object(forKey: "includeMicrophone") as? Bool ?? true
     @Published var audioSource = UserDefaults.standard.string(forKey: "audioSource") ?? ""
-    let codex = CodexService()
+    let codex: CodexService
     let audio = AudioCapture()
     let attribution = MeetingAttribution()
     let library: LibraryStore
@@ -66,7 +67,8 @@ final class AppState: ObservableObject {
     private var noteSaveTasks: [UUID: Task<Void, Never>] = [:]
     enum Detail: String, CaseIterable { case notes = "Notes", transcript = "Transcript", stories = "Must-say" }
 
-    init(root: URL? = nil, connect: Bool = true) {
+    init(root: URL? = nil, connect: Bool = true, codex: CodexService? = nil) {
+        self.codex = codex ?? CodexService()
         do { library = try LibraryStore(root: root) }
         catch { fatalError("Could not open the Oblivion library: \(error.localizedDescription)") }
         do {
@@ -110,7 +112,7 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult func newCall() -> UUID {
-        var call = CallRecord(automaticTitlePending: true)
+        var call = CallRecord(prepModel: UserDefaults.standard.string(forKey: "prepModel").flatMap { $0.isEmpty ? nil : $0 }, prepEffort: UserDefaults.standard.string(forKey: "prepEffort").flatMap { $0.isEmpty ? nil : $0 }, automaticTitlePending: true)
         call.messages = [ChatMessage(role: "assistant", text: Prompts.intake)]
         calls.insert(call, at: 0); selectedID = call.id; composer = ""; detail = nil; showArchived = false
         persist(call.id)
@@ -204,6 +206,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    func setChatModel(_ model: String?, callID: UUID) {
+        guard !busyCalls.contains(callID) else { return }
+        modify(callID) { $0.prepModel = model; $0.prepEffort = nil }
+    }
+
+    func removeComposerAttachment(_ attachmentID: UUID, callID: UUID) {
+        guard calls.first(where: { $0.id == callID })?.composerAttachments.contains(where: { $0.id == attachmentID }) == true else { return }
+        // Saved message images stay intact, including when a new draft is removed
+        // while the previous turn is still responding.
+        modify(callID) { $0.attachments.removeAll { $0.id == attachmentID } }
+    }
+
     func send(_ override: String? = nil, system: Bool = false, displayText: String? = nil) {
         var text = (override ?? composer).trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty, override == nil, !(selected?.unsentImages.isEmpty ?? true) { text = "Help me understand these images in the context of this call." }
@@ -217,33 +231,39 @@ final class AppState: ObservableObject {
         }
         let responseID = UUID()
         modify(id) { $0.messages.append(ChatMessage(id: responseID, role: "assistant", text: "", pending: true)) }
-        busyCalls.insert(id); chatStatus = "Thinking…"
+        busyCalls.insert(id); chatStatuses[id] = "Thinking…"
         if !system { requestAutomaticTitle(id) }
+        let submittedCall = calls.first { $0.id == id }
         tasks[id] = Task { [weak self] in
             guard let self else { return }
             defer {
-                busyCalls.remove(id); tasks[id] = nil; chatStatus = ""; persist(id)
+                busyCalls.remove(id); tasks[id] = nil; chatStatuses[id] = nil; persist(id)
                 if pendingSummaries.remove(id) != nil { postSummary(id) }
             }
+            let stream = ChatResponseStream { [weak self] output in
+                self?.modify(id, { record in
+                    if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].text = output }
+                }, save: false)
+                if self?.chatStatuses[id] != "Writing…" { self?.chatStatuses[id] = "Writing…" }
+                if Date().timeIntervalSince(self?.lastSave ?? .distantPast) > 2 { self?.persist(id) }
+            }
+            defer { stream.stop() }
             do {
-                guard let call = calls.first(where: { $0.id == id }) else { return }
-                let threadID = try await codex.thread(cwd: library.directory(id), existing: call.threadID)
+                guard let call = submittedCall else { return }
+                let threadID = try await codex.thread(cwd: library.directory(id), existing: call.threadID, modelOverride: call.prepModel)
                 modify(id) { $0.threadID = threadID }
                 let context = chatContext(call: call, question: text)
-                var lastRender = Date.distantPast
-                let result = try await codex.run(threadID: threadID, text: context, images: library.imageURLs(for: call), onText: { [weak self] output in
-                    // Network deltas can arrive much faster than display frames.
-                    // The complete final response is always applied below.
-                    guard Date().timeIntervalSince(lastRender) >= 1.0 / 30 else { return }
-                    lastRender = Date()
-                    self?.modify(id, { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].text = output } }, save: false)
-                    if Date().timeIntervalSince(self?.lastSave ?? .distantPast) > 2 { self?.persist(id) }
-                }, onStatus: { [weak self] status in if self?.chatStatus != status { self?.chatStatus = status } })
+                let result = try await codex.run(threadID: threadID, text: context, images: library.imageURLs(for: call), modelOverride: call.prepModel, effortOverride: call.prepEffort,
+                    onText: { stream.receive($0) },
+                    onStatus: { [weak self] status in if self?.chatStatuses[id] != status { self?.chatStatuses[id] = status } })
+                stream.stop()
                 modify(id) { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].text = result; record.messages[index].pending = false } }
                 if !system { requestAutomaticTitle(id) }
             } catch is CancellationError {
+                stream.finish()
                 modify(id) { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].interrupted = true; record.messages[index].pending = false; if record.messages[index].text.isEmpty { record.messages[index].text = "Response stopped." } } }
             } catch {
+                stream.finish()
                 self.error = error.localizedDescription
                 modify(id) { record in if let index = record.messages.firstIndex(where: { $0.id == responseID }) { record.messages[index].interrupted = true; record.messages[index].pending = false; if record.messages[index].text.isEmpty { record.messages[index].text = "I couldn’t finish this response. Your message is saved—reconnect and try again." } } }
             }

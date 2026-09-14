@@ -5,6 +5,7 @@
 A native macOS copilot for better conversations. Prepare in a chat, get live coaching during a call, and keep the transcript and notes afterward.
 
 - Free-form preparation with images, PDFs, text, links, and research.
+- Per-chat model and reasoning effort controls, with buffered replies and selectable tables.
 - Automatic person + company/role chat names, with manual renaming.
 - A floating HUD with one next recommendation, exact Must-say wording, and quick private questions.
 - On-device transcription of microphone and meeting audio.
@@ -24,7 +25,9 @@ open ~/Applications/Oblivion.app
 
 Quit Oblivion before reinstalling. Run `scripts/test.sh` for tests.
 
-Use **+** to attach files, or paste screenshots and copied image files into the composer. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
+Use **+** to attach files, or paste screenshots and copied image files into the composer. Sent images leave the composer and stay on their original message; the × removes an unsent attachment. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
+
+Choose the model and reasoning effort below the composer. Choices are saved per chat and apply to its next reply. Replies appear in coherent chunks; Copy keeps the original Markdown, including tables.
 
 **Save for call** opens **Must-say** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing prepared answers remain available. This is priority context, not a separate model cache or a guarantee of perfect matching.
 

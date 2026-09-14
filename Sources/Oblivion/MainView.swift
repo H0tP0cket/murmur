@@ -115,18 +115,18 @@ struct MainView: View {
 
     private var composer: some View {
         VStack(spacing: 9) {
-            if let call = state.selected, !call.attachments.isEmpty {
+            if let call = state.selected, !call.composerAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack { ForEach(call.attachments) { attachment in
+                    HStack { ForEach(call.composerAttachments) { attachment in
                         HStack(spacing: 6) {
                             if attachment.isImage { ImageAttachmentView(url: state.library.imageURL(attachment, callID: call.id), name: attachment.name, size: 30) }
                             else { Image(systemName: "doc.text") }
                             Text(attachment.name).lineLimit(1).frame(maxWidth: 150)
-                            Button { state.modify(call.id) { $0.attachments.removeAll { $0.id == attachment.id } } } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).help("Remove from context").accessibilityLabel("Remove \(attachment.name) from context")
+                            Button { state.removeComposerAttachment(attachment.id, callID: call.id) } label: { Image(systemName: "xmark").font(.system(size: 9)).frame(width: 22, height: 22).contentShape(Rectangle()) }.buttonStyle(QuietButtonStyle()).help("Remove attachment").accessibilityLabel("Remove \(attachment.name)")
                         }
                             .font(.system(size: 11)).padding(8).background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     } }
-                }.frame(height: call.attachments.contains(where: \.isImage) ? 50 : 36)
+                }.frame(height: call.composerAttachments.contains(where: \.isImage) ? 50 : 40)
             }
             HStack(alignment: .bottom, spacing: 9) {
                 Button { state.chooseAttachment() } label: { Image(systemName: "plus").font(.system(size: 17, weight: .regular)).foregroundStyle(.secondary).frame(width: 32, height: 32) }.buttonStyle(QuietButtonStyle()).help("Attach images, PDFs, or text")
@@ -146,6 +146,7 @@ struct MainView: View {
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(composerFocused ? 0.18 : 0.07), lineWidth: 0.7))
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: composerFocused)
+            ChatModelControls(service: state.codex)
             if state.activeCallID != nil { CaptureStatusCaption(audio: state.audio, active: true, starting: state.callStarting, ending: state.callEnding) }
         }.frame(maxWidth: 760).padding(.horizontal, 30).padding(.bottom, 24).padding(.top, 12).frame(maxWidth: .infinity)
     }
