@@ -23,7 +23,7 @@ scripts/install.sh
 open ~/Applications/Oblivion.app
 ```
 
-Quit Oblivion before reinstalling. Run `scripts/test.sh` for tests.
+Quit Oblivion before reinstalling. Launch the installed copy in `~/Applications`; temporary bundles are staged under `.build/bundle` and removed after installation. Run `scripts/test.sh` for tests.
 
 Use **+** to attach files, or paste screenshots and copied image files into the composer. Sent images leave the composer and stay on their original message; the × removes an unsent attachment. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
 
