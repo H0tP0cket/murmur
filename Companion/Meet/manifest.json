@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Oblivion Meet Companion",
+  "name": "MurMur Meet Companion",
   "version": "0.1.0",
-  "description": "Share participant names and speaking activity with your local Oblivion call. No audio, transcript, or meeting content is sent.",
+  "description": "Share participant names and speaking activity with your local MurMur call. No audio, transcript, or meeting content is sent.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArrTZ79IVXlNsB7Mgy9+N+hsmeOjvlaQrvmr5tI1GHsGy54+/4EuRueMK1KXVzrsEwdMu6chd/cwAotjCk8mPcBCUfXWKmLI8dVdphheX0ip2OrWZJR/lFkzbrUujIVEWHU3sixND6aSB3MiuaDRerlnT4TTRvfgqzkHaoPlTretjLJuUWdFm5GkZwUKSuuIhmoRPu6fuxQtin1IrI/6Qjw/1uirqV0S2grkRqGzaVx+rgO8EkZoW9zn+uHAqLJ5n40dCntPjpX9bG1DHuWF1LE3Rs9OcGP42jLpMvvC8a2N8xwmw4ESYLhjAXMNbUeM8ulkbFKdkouMWSg+7JGWDsQIDAQAB",
   "permissions": [
     "nativeMessaging",

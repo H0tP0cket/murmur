@@ -44,8 +44,8 @@ def main():
                 os.replace(path,ROOT/'meet-speakers.json')
             finally:
                 if os.path.exists(path): os.unlink(path)
-            reply('Connected to your active Oblivion call.')
-        except (ValueError,KeyError,TypeError,FileNotFoundError): reply('Start a call in Oblivion to connect speaker names.')
+            reply('Connected to your active MurMur call.')
+        except (ValueError,KeyError,TypeError,FileNotFoundError): reply('Start a call in MurMur to connect speaker names.')
         except Exception: reply('Unable to update local speaker names.')
 
 if __name__ == '__main__': main()

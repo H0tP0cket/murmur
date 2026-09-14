@@ -5,8 +5,17 @@ final class CodexService: ObservableObject {
     @Published var status = "Connecting…"
     @Published var models: [ModelOption] = []
     @Published var isConnected = false
+    @Published private(set) var isSigningIn = false
+    @Published private(set) var accountEmail: String?
+    @Published private(set) var loginURL: URL?
+    @Published private(set) var authenticationError: String?
     private let executableURL: URL?
-    init(executableURL: URL? = nil) { self.executableURL = executableURL }
+    private let homeURL: URL?
+    private var loginID: String?
+    private var loginResults: [String: [String: Any]] = [:]
+    private var ignoredLoginIDs = Set<String>()
+    var usesSharedSignIn: Bool { homeURL?.lastPathComponent == ".codex" }
+    init(executableURL: URL? = nil, homeURL: URL? = nil) { self.executableURL = executableURL; self.homeURL = homeURL }
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
@@ -36,6 +45,7 @@ final class CodexService: ObservableObject {
 
     func connect() async throws {
         if isConnected { return }
+        if process?.isRunning == true, connectTask == nil { return try await refreshAccount() }
         if let task = connectTask { return try await task.value }
         let task = Task { do { try await self.start() } catch { self.disconnect(); throw error } }
         connectTask = task
@@ -45,13 +55,19 @@ final class CodexService: ObservableObject {
 
     private func start() async throws {
         status = "Connecting…"
-        let candidates = [executableURL?.path, UserDefaults.standard.string(forKey: "codexPath"), NSHomeDirectory() + "/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex"].compactMap { $0 }
-        guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { throw OblivionError.message("Codex isn’t installed. Set its executable path in Settings.") }
+        guard let executable = CodexRuntime.executable(override: executableURL) else { throw OblivionError.message("The bundled Codex runtime is missing. Reinstall MurMur or choose a Codex executable in Settings.") }
         let proc = Process(), stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
-        proc.executableURL = URL(fileURLWithPath: path)
+        proc.executableURL = executable
         proc.arguments = ["app-server"]
         proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
         var environment = ProcessInfo.processInfo.environment
+        if let homeURL {
+            try FileManager.default.createDirectory(at: homeURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            environment["CODEX_HOME"] = homeURL.path
+            proc.currentDirectoryURL = homeURL
+        }
+        // This product uses subscription authentication only, never an inherited API key.
+        for key in ["OPENAI_API_KEY", "CODEX_API_KEY"] { environment.removeValue(forKey: key) }
         environment["PATH"] = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         proc.environment = environment
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -68,11 +84,19 @@ final class CodexService: ObservableObject {
         } }
         process = proc; input = stdin.fileHandleForWriting; buffer = Data()
         try proc.run()
-        _ = try await request("initialize", ["clientInfo": ["name": "oblivion", "title": "Oblivion", "version": "0.1.0"], "capabilities": ["experimentalApi": true]])
+        _ = try await request("initialize", ["clientInfo": ["name": "murmur", "title": "MurMur", "version": "0.2.0"], "capabilities": ["experimentalApi": true]])
         try send(["method": "initialized"])
-        let account = try await request("account/read", [:])
-        let type = (account["account"] as? [String: Any])?["type"] as? String
-        guard type == "chatgpt" else { throw OblivionError.message("Sign in with ChatGPT using ‘codex login’, then reconnect. Oblivion uses your Codex subscription.") }
+        try await refreshAccount()
+    }
+
+    func refreshAccount() async throws {
+        let result = try await request("account/read", ["refreshToken": true])
+        let account = result["account"] as? [String: Any]
+        guard account?["type"] as? String == "chatgpt" else {
+            isConnected = false; models = []; accountEmail = nil
+            status = "Sign in with ChatGPT"; return
+        }
+        accountEmail = account?["email"] as? String
         var choices: [ModelOption] = [], cursor: String?
         repeat {
             var params: [String: Any] = ["limit": 100, "includeHidden": false]
@@ -85,6 +109,51 @@ final class CodexService: ObservableObject {
             cursor = result["nextCursor"] as? String
         } while cursor != nil
         models = choices; isConnected = true; status = "Connected to Codex"
+    }
+
+    @discardableResult func beginLogin() async throws -> URL {
+        authenticationError = nil
+        try await connect()
+        if let loginURL, isSigningIn { return loginURL }
+        isSigningIn = true; status = "Finish signing in in your browser"
+        do {
+            let result = try await request("account/login/start", ["type": "chatgpt"])
+            guard let id = result["loginId"] as? String, let string = result["authUrl"] as? String,
+                  let url = URL(string: string), url.scheme == "https", url.host == "auth.openai.com" else {
+                throw OblivionError.message("Codex couldn’t open ChatGPT sign-in. Please try again.")
+            }
+            loginID = id; loginURL = url
+            if let completed = loginResults.removeValue(forKey: id) { completeLogin(completed) }
+            return url
+        } catch {
+            isSigningIn = false; authenticationError = error.localizedDescription; status = "Sign-in needs attention"; throw error
+        }
+    }
+
+    func cancelLogin() async {
+        guard let id = loginID else { return }
+        ignoredLoginIDs.insert(id); loginID = nil; loginURL = nil; isSigningIn = false
+        _ = try? await request("account/login/cancel", ["loginId": id])
+        status = "Sign in with ChatGPT"
+    }
+
+    func signOut() async throws {
+        guard turns.isEmpty else { throw OblivionError.message("Finish the current response and end your call before signing out.") }
+        await cancelLogin()
+        _ = try await request("account/logout", [:])
+        isConnected = false; models = []; accountEmail = nil; authenticationError = nil; status = "Sign in with ChatGPT"
+    }
+
+    private func completeLogin(_ params: [String: Any]) {
+        guard let id = params["loginId"] as? String, !ignoredLoginIDs.contains(id) else { return }
+        guard id == loginID else { if isSigningIn { loginResults[id] = params }; return }
+        loginID = nil; loginURL = nil; isSigningIn = false
+        if params["success"] as? Bool == true {
+            Task { do { try await refreshAccount() } catch { authenticationError = error.localizedDescription; status = "Connection needs attention" } }
+        } else {
+            authenticationError = params["error"] as? String ?? "Sign-in wasn’t completed. Try again when you’re ready."
+            status = "Sign in with ChatGPT"
+        }
     }
 
     func model(live: Bool) -> String? {
@@ -110,6 +179,7 @@ final class CodexService: ObservableObject {
 
     func thread(cwd: URL, existing: String? = nil, live: Bool = false, ephemeral: Bool = false, instructions: String? = nil, modelOverride: String? = nil) async throws -> String {
         try await connect()
+        guard isConnected else { throw OblivionError.message("Sign in with ChatGPT to start preparing your call.") }
         try Task.checkCancellation()
         if let existing {
             _ = try await request("thread/resume", ["threadId": existing, "cwd": cwd.path, "developerInstructions": Prompts.outputStyle])
@@ -183,7 +253,7 @@ final class CodexService: ObservableObject {
     }
 
     private func disconnected() {
-        isConnected = false; status = "Codex disconnected"
+        isConnected = false; isSigningIn = false; loginID = nil; loginURL = nil; loginResults = [:]; accountEmail = nil; models = []; status = "Codex disconnected"
         buffer.removeAll(keepingCapacity: false)
         requestTimeouts.values.forEach { $0.cancel() }; requestTimeouts.removeAll()
         let requests = pending; pending.removeAll()
@@ -229,6 +299,10 @@ final class CodexService: ObservableObject {
                 // Never leave a server request hanging. Our threads use noninteractive tool policies.
                 let result: [String: Any] = method.contains("requestApproval") ? ["decision": "decline"] : method.contains("requestUserInput") ? ["answers": [:]] : ["success": false, "contentItems": [["type": "inputText", "text": "This action is unavailable. Continue in the chat and ask the user if needed."]]]
                 try? send(["id": id, "result": result]); continue
+            }
+            if method == "account/login/completed" { completeLogin(params); continue }
+            if method == "account/updated", params["authMode"] is NSNull {
+                isConnected = false; models = []; accountEmail = nil; status = "Sign in with ChatGPT"; continue
             }
             guard let threadID = params["threadId"] as? String, let waiter = turns[threadID] else { continue }
             if waiter.turnID == nil { waiter.queuedEvents.append((method, params)); continue }

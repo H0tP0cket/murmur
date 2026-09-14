@@ -1,0 +1,21 @@
+name: macOS checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run native tests
+        run: scripts/test.sh
+      - name: Build self-contained app
+        run: scripts/build.sh
+      - name: Verify packaged application
+        run: |
+          codesign --verify --deep --strict .build/bundle/MurMur.app
+          .build/bundle/MurMur.app/Contents/MacOS/codex --version

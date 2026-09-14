@@ -107,14 +107,16 @@ final class MeetingAttribution: ObservableObject {
         let source = resources.appendingPathComponent("Companion")
         let target = root.appendingPathComponent("Companion")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-        for name in ["Meet", "native_host.py", "extension-id.txt"] {
+        for name in ["Meet", "extension-id.txt"] {
             let destination = target.appendingPathComponent(name)
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
             try FileManager.default.copyItem(at: source.appendingPathComponent(name), to: destination)
         }
-        let host = target.appendingPathComponent("native_host.py")
+        let host = target.appendingPathComponent("MurMurMeetBridge")
+        if FileManager.default.fileExists(atPath: host.path) { try FileManager.default.removeItem(at: host) }
+        try FileManager.default.copyItem(at: resources.deletingLastPathComponent().appendingPathComponent("MacOS/MurMurMeetBridge"), to: host)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: host.path)
-        let manifest: [String: Any] = ["name": "dev.oblivion.meet", "description": "Oblivion local speaker names", "path": host.path, "type": "stdio", "allowed_origins": ["chrome-extension://koikkoppmobklaimhplgjgkfljiclnjj/"]]
+        let manifest: [String: Any] = ["name": "dev.oblivion.meet", "description": "MurMur local speaker names", "path": host.path, "type": "stdio", "allowed_origins": ["chrome-extension://koikkoppmobklaimhplgjgkfljiclnjj/"]]
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Google/Chrome/NativeMessagingHosts")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted).write(to: folder.appendingPathComponent("dev.oblivion.meet.json"), options: .atomic)

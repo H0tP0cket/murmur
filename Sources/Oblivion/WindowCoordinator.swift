@@ -15,7 +15,7 @@ final class WindowCoordinator {
         guard let state, state.activeCallID != nil else { return }
         if panel == nil {
             let panel = CopilotPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 340), styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
-            panel.title = "Oblivion · Call"; panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
+            panel.title = "MurMur · Call"; panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
             panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.isMovableByWindowBackground = true; panel.minSize = NSSize(width: 460, height: 230)

@@ -6,6 +6,10 @@ import ImageIO
 struct MainView: View {
     @EnvironmentObject var state: AppState
     @State private var sidebarVisible = true
+    @State private var creatingFolder = false
+    @State private var folderName = ""
+    @State private var renamingFolder: UUID?
+    @FocusState private var folderFieldFocused: Bool
     @State private var renameID: UUID?
     @State private var composerHeight: CGFloat = 32
     @State private var composerFocused = false
@@ -27,6 +31,7 @@ struct MainView: View {
             VStack(spacing: 0) {
                 header.zIndex(1)
                 if let message = state.error { errorBanner(message) }
+                ChatGPTAccountView(service: state.codex).padding(.horizontal, 28).padding(.bottom, state.codex.isConnected ? 0 : 14)
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         if let call = state.selected {
@@ -34,8 +39,8 @@ struct MainView: View {
                                              busy: state.isBusy, status: state.chatStatus,
                                              save: { state.editingStory = PreparedStory(title: "", body: $0) })
                                 .equatable().id(call.id)
-                        } else { welcome }
-                        composer
+                            composer
+                        } else { HomeView(calendar: state.calendar) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if let detail = state.detail, state.selected != nil {
@@ -58,7 +63,11 @@ struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) { OblivionMark(size: 27); Text("Oblivion").font(.system(size: 16, weight: .semibold)).tracking(-0.3); Spacer() }.padding(.top, 39).padding(.horizontal, 19).padding(.bottom, 21)
+            HStack(spacing: 10) { OblivionMark(size: 27); Text("MurMur").font(.system(size: 16, weight: .semibold)).tracking(-0.3); Spacer() }.padding(.top, 39).padding(.horizontal, 19).padding(.bottom, 21)
+            Button { state.showHome() } label: {
+                Label("Home", systemImage: "house").font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(.primary.opacity(state.selectedID == nil && state.selectedFolderID == nil ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 9))
+            }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 12).padding(.bottom, 6)
             Button { state.newCall() } label: {
                 HStack { Label("New call", systemImage: "square.and.pencil"); Spacer(); Text("⌘N").font(.system(size: 10)).foregroundStyle(.tertiary) }
                     .font(.system(size: 13, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 11)
@@ -66,11 +75,37 @@ struct MainView: View {
                     .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.055), lineWidth: 0.5))
             }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 12).accessibilityIdentifier("newCall")
             HStack(spacing: 7) { Image(systemName: "magnifyingglass"); TextField("Search calls", text: $state.sidebarSearch).textFieldStyle(.plain) }.font(.system(size: 12)).foregroundStyle(.secondary).padding(10).padding(.horizontal, 9).padding(.top, 9)
-            HStack { Text(state.showArchived ? "ARCHIVED" : "RECENT").font(.system(size: 10, weight: .semibold)).tracking(1); Spacer() }.foregroundStyle(.tertiary).padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 9)
+            Button { creatingFolder = true; renamingFolder = nil; folderName = ""; folderFieldFocused = true } label: {
+                Label("Create folder", systemImage: "folder.badge.plus").font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
+            }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 12)
+            if creatingFolder {
+                TextField("Person or company", text: $folderName).textFieldStyle(.plain).font(.system(size: 12)).padding(9)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal, 18)
+                    .focused($folderFieldFocused).task { try? await Task.sleep(for: .milliseconds(50)); if !Task.isCancelled { folderFieldFocused = true } }
+                    .onSubmit {
+                        if let id = renamingFolder { state.renameFolder(id, name: folderName) } else { state.createFolder(name: folderName) }
+                        creatingFolder = false; renamingFolder = nil
+                    }.onExitCommand { creatingFolder = false; renamingFolder = nil }.accessibilityLabel("Folder name")
+            }
             ScrollView {
-                LazyVStack(spacing: 3) {
+                LazyVStack(alignment: .leading, spacing: 3) {
+                    if !state.folders.isEmpty {
+                        sidebarHeading("FOLDERS")
+                        ForEach(state.folders) { folder in
+                            Button { state.openFolder(folder.id) } label: {
+                                HStack(spacing: 9) { Image(systemName: "folder"); Text(folder.name).lineLimit(1); Spacer(minLength: 2); Text("\(state.calls.filter { $0.folderID == folder.id && !$0.archived }.count)").font(.system(size: 10)).foregroundStyle(.tertiary) }
+                                    .font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 9)
+                                    .background(.primary.opacity(state.selectedFolderID == folder.id ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 9))
+                            }.buttonStyle(QuietButtonStyle()).contextMenu {
+                                Button("Rename folder") { renamingFolder = folder.id; folderName = folder.name; creatingFolder = true; folderFieldFocused = true }
+                                Button("Remove folder, keep calls") { state.removeFolder(folder.id) }
+                            }
+                        }
+                    }
+                    sidebarHeading(state.showArchived ? "ARCHIVED" : "RECENT")
                     ForEach(state.visibleCalls) { call in
                         CallRow(call: call, selected: call.id == state.selectedID, active: call.id == state.activeCallID, select: { state.selectedID = call.id }, transcript: { state.selectedID = call.id; state.detail = .transcript }, rename: { state.selectedID = call.id; renameID = call.id }, archive: { state.archive(call.id) })
+                            .contextMenu { CallFolderMenu(callID: call.id) }
                     }
                 }.padding(.horizontal, 10)
             }
@@ -97,7 +132,7 @@ struct MainView: View {
                 EditableCallTitle(title: call.title, requestFocus: renameID == call.id,
                                   didFocus: { renameID = nil }, save: { state.renameCall(call.id, title: $0) })
                     .id(call.id).padding(.leading, -6)
-            } else { Text("Oblivion").font(.system(size: 14, weight: .medium)) }
+            } else { Text(state.selectedFolder?.name ?? "Home").font(.system(size: 14, weight: .medium)) }
             Spacer(minLength: 8)
             if state.selected != nil {
                 HStack(spacing: 2) {
@@ -114,24 +149,8 @@ struct MainView: View {
         }.padding(.horizontal, 22).frame(height: 66)
     }
 
-    private var welcome: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            OblivionMark(size: 62).padding(.bottom, 8)
-            Text("A little preparation.\nA better conversation.").font(.system(size: 29, weight: .medium)).multilineTextAlignment(.center)
-            Text("Talk through your next call. Bring your context,\nyour questions, and what you want to accomplish.").font(.system(size: 14)).foregroundStyle(.secondary).multilineTextAlignment(.center).lineSpacing(5)
-            HStack(spacing: 8) {
-                starter("Prepare for an interview", icon: "person.crop.rectangle")
-                starter("Plan a discovery call", icon: "bubble.left.and.bubble.right")
-            }.padding(.top, 15)
-            Spacer(); Spacer().frame(height: 15)
-        }.frame(maxWidth: .infinity)
-    }
-
-    private func starter(_ title: String, icon: String) -> some View {
-        Button { state.newCall(); state.composer = title == "Prepare for an interview" ? "I’m preparing for an interview. " : "I’m planning a discovery call. " } label: {
-            Label(title, systemImage: icon).font(.system(size: 12)).padding(.horizontal, 13).padding(.vertical, 11).overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.12)))
-        }.buttonStyle(.plain)
+    private func sidebarHeading(_ title: String) -> some View {
+        Text(title).font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(.tertiary).padding(.horizontal, 12).padding(.top, 18).padding(.bottom, 7)
     }
 
     private var composer: some View {
@@ -230,7 +249,7 @@ struct CallRow: View {
             Text(call.title).font(.system(size: 13)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             if hovering || selected {
                 Button(action: transcript) { Image(systemName: "doc.text").font(.system(size: 11)) }.buttonStyle(.plain).help("View transcript")
-                Menu { Button("Rename", action: rename); Button(call.archived ? "Restore" : "Archive", action: archive) } label: { Image(systemName: "ellipsis").font(.system(size: 12)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 18)
+                Menu { Button("Rename", action: rename); CallFolderMenu(callID: call.id); Button(call.archived ? "Restore" : "Archive", action: archive) } label: { Image(systemName: "ellipsis").font(.system(size: 12)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 18)
             }
         }.padding(.horizontal, 10).padding(.vertical, 11)
             .background(selected ? Color.white.opacity(0.075) : hovering ? Color.white.opacity(0.035) : Color.clear, in: RoundedRectangle(cornerRadius: 10))

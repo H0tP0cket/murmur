@@ -170,7 +170,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
         status = "Allow Screen & System Audio Recording if prompted…"
         let content: SCShareableContent
         do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) }
-        catch { throw OblivionError.message("Allow Screen & System Audio Recording for Oblivion in System Settings, then try again. \(error.localizedDescription)") }
+        catch { throw OblivionError.message("Allow Screen & System Audio Recording for MurMur in System Settings, then try again. \(error.localizedDescription)") }
         try ensureCurrent(generation)
         guard let display = content.displays.first else { throw OblivionError.message("No display is available for meeting audio capture.") }
         applications = content.applications.filter { !$0.applicationName.isEmpty && $0.bundleIdentifier != Bundle.main.bundleIdentifier }.map { ($0.bundleIdentifier, $0.applicationName) }.sorted { $0.name < $1.name }

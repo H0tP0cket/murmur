@@ -40,7 +40,7 @@ struct DetailView: View {
     }
 
     private func notes(_ call: CallRecord) -> some View {
-        VSplitView {
+        NotesSplitView(expanded: showingAINotes) {
             VStack(alignment: .leading, spacing: 12) {
                 PersonalNotesEditor(callID: call.id).padding(.horizontal, 20)
                 HStack {
@@ -49,7 +49,8 @@ struct DetailView: View {
                     Button("Ask about notes") { state.composer = "Reference my notes. What should I focus on next?" }
                         .buttonStyle(.bordered).controlSize(.small).font(.system(size: 11))
                 }.padding(.horizontal, 20).padding(.bottom, 18)
-            }.frame(minHeight: 180, maxHeight: .infinity)
+            }.frame(maxHeight: .infinity)
+        } bottom: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Button { showingAINotes.toggle() } label: {
@@ -63,7 +64,7 @@ struct DetailView: View {
                 }.padding(.horizontal, 14).padding(.top, 6)
                 if showingAINotes { generatedNotes(call) }
             }
-            .frame(minHeight: showingAINotes ? 160 : 40, idealHeight: showingAINotes ? 280 : 40, maxHeight: showingAINotes ? .infinity : 40)
+            .frame(maxHeight: .infinity, alignment: .top)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: showingAINotes) { _, expanded in
                 if expanded { state.updateNotes(callID: call.id, ifNeeded: true) }
@@ -94,7 +95,7 @@ struct DetailView: View {
                 }
                 Button("Ask about AI notes") { state.composer = "What are the most important takeaways from the AI call notes?" }.buttonStyle(.bordered).controlSize(.small).font(.system(size: 12))
             }.padding(.horizontal, 20).padding(.bottom, 24)
-        }
+        }.defaultScrollAnchor(.top)
     }
 
     private func stories(_ call: CallRecord) -> some View {
@@ -170,7 +171,7 @@ struct StoryEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Cue card").font(.title2.weight(.semibold))
-            Text("Describe the situation or the kind of question they might ask. Oblivion matches the meaning and shows your saved wording exactly.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+            Text("Describe the situation or the kind of question they might ask. MurMur matches the meaning and shows your saved wording exactly.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
             VStack(alignment: .leading, spacing: 8) {
                 Text("When to use it").font(.system(size: 12, weight: .medium))
                 TextField("When they ask about a time I solved a difficult challenge", text: $story.cues, axis: .vertical)
@@ -223,7 +224,7 @@ struct CallSetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             Image(systemName: "waveform").font(.system(size: 28)).padding(.bottom, 2)
             Text("Ready for your conversation?").font(.system(size: 24, weight: .semibold))
-            Text("Oblivion listens to your microphone and meeting audio, transcribes on this Mac, and uses your preparation to help you in the moment.").font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(5)
+            Text("MurMur listens to your microphone and meeting audio, transcribes on this Mac, and uses your preparation to help you in the moment.").font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(5)
             Picker("Meeting audio", selection: $state.audioSource) {
                 Text("All system audio").tag("")
                 Text("Google Chrome (Meet)").tag("com.google.Chrome")
@@ -258,6 +259,7 @@ struct SettingsView: View {
                     PersonalContextHelper()
                 }
                 Section("Codex") {
+                    ChatGPTAccountView(service: state.codex, showSignedIn: true, canSignOut: state.activeCallID == nil && state.busyCalls.isEmpty)
                     CodexStatusView(service: state.codex)
                     Picker("Preparation", selection: $prepModel) { Text("Automatic").tag(""); ForEach(state.codex.models) { Text($0.name).tag($0.id) } }
                     Picker("Live coaching", selection: $liveModel) { Text("Automatic · fast").tag(""); ForEach(state.codex.models) { Text($0.name).tag($0.id) } }

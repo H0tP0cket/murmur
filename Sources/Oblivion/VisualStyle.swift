@@ -12,14 +12,12 @@ enum OblivionStyle {
 
 struct OblivionMark: View {
     var size: CGFloat = 32
+    private static let mark = Bundle.main.url(forResource: "MurMurMark", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
     var body: some View {
-        LogoShape().fill(.primary).frame(width: size, height: size).accessibilityHidden(true)
-    }
-}
-
-private struct LogoShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        Path(LogoGeometry.path).applying(CGAffineTransform(scaleX: rect.width / 256, y: rect.height / 256).concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
+        Group {
+            if let mark = Self.mark { Image(nsImage: mark).resizable().renderingMode(.template).scaledToFit() }
+            else { Image(systemName: "waveform").resizable().scaledToFit() }
+        }.foregroundStyle(.white).frame(width: size, height: size).accessibilityHidden(true)
     }
 }
 

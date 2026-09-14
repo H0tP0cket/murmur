@@ -27,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.command === 'status') { reply({status: latestStatus, connected: !!binding}); return; }
   if (message.command === 'disconnect') {
     binding = undefined; port?.disconnect(); port = undefined;
-    latestStatus = 'Disconnected. Audio capture in Oblivion is unchanged.';
+    latestStatus = 'Disconnected. Audio capture in MurMur is unchanged.';
     reply({status: latestStatus}); return;
   }
   if (message.command === 'connect') {
@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         reply({status:'Open an active Google Meet call first.'}); return;
       }
       binding = {tabId:tab.id, room}; connectHost();
-      latestStatus = 'Connecting this meeting to Oblivion…';
+      latestStatus = 'Connecting this meeting to MurMur…';
       reply({status:latestStatus});
     });
     return true;

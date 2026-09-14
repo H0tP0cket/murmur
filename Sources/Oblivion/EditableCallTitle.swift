@@ -22,7 +22,7 @@ struct EditableCallTitle: View {
         Group {
             if editing {
                 TextField("Call name", text: $draft).textFieldStyle(.plain).focused($focused)
-                    .onAppear { focused = true }
+                    .task { try? await Task.sleep(for: .milliseconds(50)); if !Task.isCancelled { focused = true } }
             } else {
                 Button { beginEditing() } label: {
                     Text(draft).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
