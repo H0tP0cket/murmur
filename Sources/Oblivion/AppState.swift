@@ -27,7 +27,6 @@ final class AppState: ObservableObject {
     }
     @Published var coachingStatus = ""
     @Published var hudVisible = false
-    @Published var showCallNotes = false
     @Published var showCallSetup = false
     @Published var showSettings = false
     @Published var editingStory: PreparedStory?

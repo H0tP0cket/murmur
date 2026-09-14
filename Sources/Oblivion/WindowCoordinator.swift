@@ -7,12 +7,11 @@ final class WindowCoordinator {
     weak var mainWindow: NSWindow?
     private weak var state: AppState?
     private var panel: NSPanel?
-    private var notesPanel: NSPanel?
     private var hotkeys: [EventHotKeyRef] = []
     private var eventHandler: EventHandlerRef?
     init(state: AppState) { self.state = state }
 
-    func showHUD() {
+    func showHUD(hideMainWindow: Bool = true) {
         guard let state, state.activeCallID != nil else { return }
         if panel == nil {
             let panel = CopilotPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 340), styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
@@ -32,9 +31,8 @@ final class WindowCoordinator {
                 panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - 310, y: screen.visibleFrame.maxY - 390))
             }
         }
-        mainWindow?.orderOut(nil)
+        if hideMainWindow { mainWindow?.orderOut(nil) }
         resizeHUD(); panel?.orderFrontRegardless(); state.hudVisible = true
-        if state.showCallNotes { presentCallNotes(focus: false) }
     }
 
     func resizeHUD() {
@@ -49,61 +47,35 @@ final class WindowCoordinator {
     }
 
     func returnToChat() {
-        if let state, state.showCallNotes, let id = state.activeCallID {
-            state.selectedID = id; state.detail = .notes
-        }
-        closeCallNotes()
+        state?.flushNoteEdits()
         panel?.orderOut(nil); state?.hudVisible = false
-        if mainWindow?.isMiniaturized == true { mainWindow?.deminiaturize(nil) }
-        mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        revealMainWindow()
     }
+
     func toggleHUD() {
         guard let state, state.activeCallID != nil else { return }
         if state.hudVisible {
-            panel?.orderOut(nil); notesPanel?.orderOut(nil); state.flushNoteEdits()
-            state.hudVisible = false
-        } else { showHUD() }
+            panel?.orderOut(nil); state.flushNoteEdits(); state.hudVisible = false
+        } else { showHUD(hideMainWindow: false) }
     }
+
     func ask() {
         guard let state, state.activeCallID != nil else { return }
-        state.showDirectQuestion = true; showHUD(); panel?.makeKeyAndOrderFront(nil)
+        state.showDirectQuestion = true
+        showHUD(hideMainWindow: false); panel?.makeKeyAndOrderFront(nil)
     }
 
-    func toggleCallNotes() {
-        guard let state, state.activeCallID != nil, state.hudVisible else { return }
-        if state.showCallNotes { closeCallNotes() }
-        else { state.showCallNotes = true; presentCallNotes(focus: true) }
+    func showCallNotes() {
+        guard let state, let id = state.activeCallID, mainWindow != nil else { return }
+        state.flushNoteEdits()
+        state.selectedID = id; state.detail = .notes
+        showHUD(hideMainWindow: false)
+        revealMainWindow()
     }
 
-    func closeCallNotes() {
-        notesPanel?.orderOut(nil)
-        state?.showCallNotes = false
-        state?.flushNoteEdits()
-    }
-
-    private func presentCallNotes(focus: Bool) {
-        guard let state, state.activeCallID != nil else { return }
-        if notesPanel == nil {
-            let notes = CopilotPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 430), styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable], backing: .buffered, defer: false)
-            notes.title = "Oblivion · Notes"; notes.titleVisibility = .hidden; notes.titlebarAppearsTransparent = true
-            notes.isFloatingPanel = true; notes.level = .floating; notes.hidesOnDeactivate = false
-            notes.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            notes.isMovableByWindowBackground = true; notes.minSize = NSSize(width: 280, height: 260)
-            notes.isReleasedWhenClosed = false; notes.isOpaque = false; notes.backgroundColor = .clear
-            notes.appearance = NSAppearance(named: .darkAqua)
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { notes.standardWindowButton(type)?.isHidden = true }
-            notes.contentView = NSHostingView(rootView: CallNotesView().environmentObject(state))
-            notesPanel = notes
-            if let screen = panel?.screen ?? NSScreen.main {
-                let visible = screen.visibleFrame
-                let hud = panel?.frame ?? visible
-                let right = hud.maxX + 12
-                let x = right + notes.frame.width <= visible.maxX ? right : hud.minX - notes.frame.width - 12
-                notes.setFrameOrigin(NSPoint(x: min(max(x, visible.minX), visible.maxX - notes.frame.width), y: min(max(hud.maxY - notes.frame.height, visible.minY), visible.maxY - notes.frame.height)))
-            }
-        }
-        if focus { notesPanel?.makeKeyAndOrderFront(nil) }
-        else { notesPanel?.orderFrontRegardless() }
+    private func revealMainWindow() {
+        if mainWindow?.isMiniaturized == true { mainWindow?.deminiaturize(nil) }
+        mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
 
     func installShortcuts() {
@@ -162,7 +134,7 @@ struct HUDView: View {
             Divider().opacity(0.5)
             HStack(spacing: 17) {
                 Button { state.windows.returnToChat() } label: { Label("Chat", systemImage: "arrow.down.left") }.help("Return to chat · ⌘⇧X")
-                Button { state.windows.toggleCallNotes() } label: { Label("Notes", systemImage: "note.text").foregroundStyle(state.showCallNotes ? Color.primary : Color.secondary) }.help("Take notes alongside the live guidance").accessibilityLabel("Toggle call notes")
+                Button { state.windows.showCallNotes() } label: { Label("Notes", systemImage: "note.text") }.help("Open chat and notes while keeping live guidance visible").accessibilityLabel("Open call notes")
                 Button { state.windows.ask() } label: { Label("Ask", systemImage: "sparkle") }.help("Ask copilot · ⌘K")
                 Button { state.recommendationPinned = false; state.requestCoaching(force: true) } label: { Image(systemName: "arrow.clockwise") }.disabled(state.coachingBusy).help("Get another recommendation")
                 Menu {
@@ -185,31 +157,6 @@ struct HUDView: View {
         .onChange(of: state.showDirectQuestion) { _, shown in state.windows.resizeHUD(); inputFocused = shown }
         .onAppear { inputFocused = state.showDirectQuestion }
         .onKeyPress("k", phases: .down) { press in if press.modifiers.contains(.command) { state.windows.ask(); return .handled }; return .ignored }
-    }
-}
-
-struct CallNotesView: View {
-    @EnvironmentObject var state: AppState
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Notes").font(.system(size: 14, weight: .semibold))
-                Spacer()
-                Button { state.windows.closeCallNotes() } label: { Image(systemName: "xmark").frame(width: 26, height: 26) }
-                    .buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).help("Close notes").accessibilityLabel("Close call notes")
-            }.padding(.horizontal, 18).padding(.top, 13)
-            if let call = state.activeCall {
-                Text(call.title).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 16)
-                PersonalNotesEditor(callID: call.id, focusOnAppear: true).padding(.horizontal, 15).id(call.id)
-            }
-            Text("Saved with this call").font(.system(size: 10)).foregroundStyle(.tertiary)
-                .padding(.horizontal, 20).padding(.vertical, 14)
-        }
-        .background(SidebarSurface())
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.10), lineWidth: 0.7).allowsHitTesting(false))
-        .ignoresSafeArea().preferredColorScheme(.dark).tint(OblivionStyle.accent)
     }
 }
 

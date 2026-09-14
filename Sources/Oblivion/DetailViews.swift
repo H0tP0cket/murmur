@@ -122,12 +122,10 @@ struct DetailView: View {
     }
 }
 
-/// The sidebar and floating notepad edit the same saved notes by call identity.
+/// Keep the notepad bound to its conversation while navigating between calls.
 struct PersonalNotesEditor: View {
     @EnvironmentObject var state: AppState
     let callID: UUID
-    var focusOnAppear = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -138,9 +136,8 @@ struct PersonalNotesEditor: View {
             TextEditor(text: Binding(get: { state.calls.first(where: { $0.id == callID })?.notes ?? "" }, set: { state.editNotes(callID: callID, text: $0) }))
                 .font(.system(size: 15)).lineSpacing(6).scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel("Your notes")
-                .focused($focused).id(callID)
+                .id(callID)
         }
-        .onAppear { if focusOnAppear { focused = true } }
         .onDisappear { state.flushNoteEdits() }
     }
 }
