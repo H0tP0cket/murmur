@@ -7,7 +7,7 @@ struct OblivionApp: App {
     @StateObject private var state = AppState()
 
     var body: some Scene {
-        WindowGroup("MurMur", id: "main") {
+        WindowGroup("murmur", id: "main") {
             MainView().environmentObject(state)
                 .preferredColorScheme(.dark)
                 .tint(OblivionStyle.accent)

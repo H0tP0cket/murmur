@@ -113,7 +113,7 @@ struct CalendarSetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack { Text("Your calendars").font(.title2.weight(.semibold)); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
-            Text("Connect Google in macOS Internet Accounts and enable Calendars. MurMur reads only the calendars you select here and never changes events.").font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(4)
+            Text("Connect Google in macOS Internet Accounts and enable Calendars. murmur reads only the calendars you select here and never changes events.").font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(4)
             Button("Connect Google in System Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension")!) }
             if let message = calendar.message { Text(message).font(.system(size: 12)).foregroundStyle(.secondary) }
             if calendar.calendars.isEmpty {

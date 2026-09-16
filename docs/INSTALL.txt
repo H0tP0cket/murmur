@@ -1,23 +1,23 @@
-MurMur for macOS
+murmur for macOS
 
 Requires macOS 26 or later on an Apple Silicon Mac, and a ChatGPT account with Codex access. Intel Macs are not supported in this release.
 
-1. Drag MurMur to Applications. Open the installed copy.
+1. Drag murmur to Applications. Open the installed copy.
 2. This preview is not Apple-notarized. If macOS blocks it, try opening it once, then go to System Settings > Privacy & Security > Open Anyway. Use only a release you trust. Do not disable Gatekeeper.
-3. Click Sign in with ChatGPT. Complete the official OpenAI sign-in in your browser and return to MurMur. Your subscription's model availability and usage limits apply. No API key or Terminal setup is required.
+3. Click Sign in with ChatGPT. Complete the official OpenAI sign-in in your browser and return to murmur. Your subscription's model availability and usage limits apply. No API key or Terminal setup is required.
 4. Start a call when ready. Allow microphone and Screen & System Audio Recording access. The first call may download Apple's English speech assets. If permission is denied, review Privacy & Security and try again.
 
 Google Calendar
-Connect Google under macOS System Settings > Internet Accounts and enable Calendars. In MurMur Home, click Sync Google Calendar, allow Calendar access, and choose the calendars to show. MurMur never changes your events. Click Prepare on an event to create a chat.
+Connect Google under macOS System Settings > Internet Accounts and enable Calendars. In murmur Home, click Sync Google Calendar, allow Calendar access, and choose the calendars to show. murmur never changes your events. Click Prepare on an event to create a chat.
 
 Google Meet speaker names
 In Settings, choose Set up Meet companion. In Chrome open chrome://extensions, enable Developer mode, select Load unpacked and choose the opened Meet folder. During a call, click the extension and choose Use this meeting. Keep Meet's People panel open. The companion is optional; transcription works without it. For Zoom speaker names, allow Accessibility in Settings.
 
 Private data
-Chats, notes and transcripts stay in your local library. Relevant context goes directly to OpenAI for AI responses. MurMur has no developer-run server, analytics or account database. It does not retain raw audio recordings. Full-display sharing can show the floating HUD; share a separate application or browser tab instead.
+Chats, notes and transcripts stay in your local library. Relevant context goes directly to OpenAI for AI responses. murmur has no developer-run server, analytics or account database. It does not retain raw audio recordings. Full-display sharing can show the floating HUD; share a separate application or browser tab instead.
 
 Updating from Oblivion
-Quit the older app. Install MurMur and keep only the new app in Applications. Your library, existing Codex sign-in and app identity are preserved. The existing data folder retains its old name for compatibility.
+Quit the older app. Install murmur and keep only the new app in Applications. Your library, existing Codex sign-in and app identity are preserved. The existing data folder retains its old name for compatibility.
 
 Help and source
 https://github.com/H0tP0cket/oblivion

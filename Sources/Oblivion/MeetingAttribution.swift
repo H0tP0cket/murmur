@@ -116,7 +116,7 @@ final class MeetingAttribution: ObservableObject {
         if FileManager.default.fileExists(atPath: host.path) { try FileManager.default.removeItem(at: host) }
         try FileManager.default.copyItem(at: resources.deletingLastPathComponent().appendingPathComponent("MacOS/MurMurMeetBridge"), to: host)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: host.path)
-        let manifest: [String: Any] = ["name": "dev.oblivion.meet", "description": "MurMur local speaker names", "path": host.path, "type": "stdio", "allowed_origins": ["chrome-extension://koikkoppmobklaimhplgjgkfljiclnjj/"]]
+        let manifest: [String: Any] = ["name": "dev.oblivion.meet", "description": "murmur local speaker names", "path": host.path, "type": "stdio", "allowed_origins": ["chrome-extension://koikkoppmobklaimhplgjgkfljiclnjj/"]]
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Google/Chrome/NativeMessagingHosts")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted).write(to: folder.appendingPathComponent("dev.oblivion.meet.json"), options: .atomic)

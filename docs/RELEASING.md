@@ -1,6 +1,6 @@
 # Building a release
 
-The supported binary is Apple Silicon, macOS 26 or later. Swift modules keep the original internal `Oblivion` name; the product, executable and artwork are MurMur.
+The supported binary is Apple Silicon, macOS 26 or later. Swift modules keep the original internal `Oblivion` name; the product and main executable are `murmur`. Existing artwork and native helper filenames are retained.
 
 ## Downloadable preview
 

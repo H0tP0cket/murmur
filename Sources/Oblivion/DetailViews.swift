@@ -171,7 +171,7 @@ struct StoryEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Cue card").font(.title2.weight(.semibold))
-            Text("Describe the situation or the kind of question they might ask. MurMur matches the meaning and shows your saved wording exactly.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+            Text("Describe the situation or the kind of question they might ask. murmur matches the meaning and shows your saved wording exactly.").font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
             VStack(alignment: .leading, spacing: 8) {
                 Text("When to use it").font(.system(size: 12, weight: .medium))
                 TextField("When they ask about a time I solved a difficult challenge", text: $story.cues, axis: .vertical)
@@ -224,7 +224,7 @@ struct CallSetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             Image(systemName: "waveform").font(.system(size: 28)).padding(.bottom, 2)
             Text("Ready for your conversation?").font(.system(size: 24, weight: .semibold))
-            Text("MurMur listens to your microphone and meeting audio, transcribes on this Mac, and uses your preparation to help you in the moment.").font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(5)
+            Text("murmur listens to your microphone and meeting audio, transcribes on this Mac, and uses your preparation to help you in the moment.").font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(5)
             Picker("Meeting audio", selection: $state.audioSource) {
                 Text("All system audio").tag("")
                 Text("Google Chrome (Meet)").tag("com.google.Chrome")

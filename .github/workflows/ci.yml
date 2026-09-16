@@ -17,5 +17,5 @@ jobs:
         run: scripts/build.sh
       - name: Verify packaged application
         run: |
-          codesign --verify --deep --strict .build/bundle/MurMur.app
-          .build/bundle/MurMur.app/Contents/MacOS/codex --version
+          codesign --verify --deep --strict .build/bundle/murmur.app
+          .build/bundle/murmur.app/Contents/MacOS/codex --version

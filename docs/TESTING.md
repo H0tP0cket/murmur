@@ -1,6 +1,6 @@
 # Release verification
 
-MurMur 0.2.0 targets Apple Silicon and macOS 26 or later. It is a preview, not an Apple-notarized production release.
+murmur 0.2.0 targets Apple Silicon and macOS 26 or later. It is a preview, not an Apple-notarized production release.
 
 ## Automated coverage
 
@@ -16,7 +16,7 @@ Three provider/speech integration tests are opt-in. Their environment switches a
 
 Native macOS Accessibility actions and window screenshots were used because the computer-use connector was unavailable. Testing used a separate local library and fictional call content.
 
-- First launch displayed the MurMur Home page and sign-in action without needing a separately installed CLI. Clicking Sign in with ChatGPT completed authentication using the tester's existing browser session and the bundled Codex runtime.
+- First launch displayed the murmur Home page and sign-in action without needing a separately installed CLI. Clicking Sign in with ChatGPT completed authentication using the tester's existing browser session and the bundled Codex runtime.
 - A real prep response referenced the fictional personal notes and rendered a two-column table correctly. AI notes generated from those notes without changing the notepad.
 - Pasting and removing an unsent image worked. Sending cleared the composer attachment, retained the original message image, and produced a correct visual description through the bundled runtime.
 - Folder creation, numbered calls, persistence across restart and direct header editing were exercised. The test caught and fixed a first-click title-focus issue.
@@ -29,4 +29,4 @@ Native macOS Accessibility actions and window screenshots were used because the 
 
 This is not a test on a second person's Mac. Password entry and a different user's ChatGPT subscription were not tested. Available models and account access depend on OpenAI. Live multi-participant Meet/Zoom attribution and sustained long meetings still need broader testing; unknown speakers remain generic. Full-display sharing can expose the HUD.
 
-There is no Developer ID certificate on the build Mac, so the notarized release path and ordinary Gatekeeper acceptance are unverified. Preview installation uses Apple's documented Open Anyway path. Calendar integration requires Google to be connected in macOS Internet Accounts and selected in MurMur.
+There is no Developer ID certificate on the build Mac, so the notarized release path and ordinary Gatekeeper acceptance are unverified. Preview installation uses Apple's documented Open Anyway path. Calendar integration requires Google to be connected in macOS Internet Accounts and selected in murmur.

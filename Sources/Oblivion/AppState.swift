@@ -71,7 +71,7 @@ final class AppState: ObservableObject {
 
     init(root: URL? = nil, connect: Bool = true, codex: CodexService? = nil) {
         do { library = try LibraryStore(root: root ?? ProcessInfo.processInfo.environment["MURMUR_LIBRARY_ROOT"].map { URL(fileURLWithPath: $0) }) }
-        catch { fatalError("Could not open the MurMur library. \(error.localizedDescription)") }
+        catch { fatalError("Could not open the murmur library. \(error.localizedDescription)") }
         self.codex = codex ?? CodexService(homeURL: CodexRuntime.home(for: library))
         do {
             calls = try library.load()

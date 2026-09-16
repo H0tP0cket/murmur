@@ -63,7 +63,7 @@ struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) { OblivionMark(size: 27); Text("MurMur").font(.system(size: 16, weight: .semibold)).tracking(-0.3); Spacer() }.padding(.top, 39).padding(.horizontal, 19).padding(.bottom, 21)
+            HStack(spacing: 10) { OblivionMark(size: 27); Text("murmur").font(.system(size: 16, weight: .semibold)).tracking(-0.3); Spacer() }.padding(.top, 39).padding(.horizontal, 19).padding(.bottom, 21)
             Button { state.showHome() } label: {
                 Label("Home", systemImage: "house").font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 9)
                     .background(.primary.opacity(state.selectedID == nil && state.selectedFolderID == nil ? 0.07 : 0), in: RoundedRectangle(cornerRadius: 9))

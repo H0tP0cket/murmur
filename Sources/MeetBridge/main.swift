@@ -43,11 +43,11 @@ if CommandLine.arguments.count >= 2 && CommandLine.arguments[1] == origin {
                   let timestamp = session["updatedAt"] as? Double,
                   Date().timeIntervalSince1970 - timestamp < 5, let sessionID = session["session"] as? String,
                   let message = try JSONSerialization.jsonObject(with: data) as? [String: Any], var payload = sanitize(message) else {
-                reply("Start a call in MurMur to connect speaker names."); continue
+                reply("Start a call in murmur to connect speaker names."); continue
             }
             payload["session"] = sessionID; payload["receivedAt"] = Date().timeIntervalSince1970
             try JSONSerialization.data(withJSONObject: payload).write(to: root.appendingPathComponent("meet-speakers.json"), options: .atomic)
-            reply("Connected to your active MurMur call.")
-        } catch { reply("Start a call in MurMur to connect speaker names.") }
+            reply("Connected to your active murmur call.")
+        } catch { reply("Start a call in murmur to connect speaker names.") }
     }
 }

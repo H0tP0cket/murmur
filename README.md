@@ -1,6 +1,6 @@
-<p align="center"><img src="Resources/Brand/AppIcon.png" width="88" alt="MurMur icon"></p>
+<p align="center"><img src="Resources/Brand/AppIcon.png" width="88" alt="murmur icon"></p>
 
-# MurMur
+# murmur
 
 A native macOS copilot for better conversations. Prepare in a chat, get live coaching during a call, and keep the transcript and notes afterward.
 
@@ -16,12 +16,12 @@ All AI reasoning runs through **Codex App Server** using your ChatGPT account. T
 
 ## Download
 
-**[Download MurMur for macOS](https://github.com/H0tP0cket/oblivion/releases)**
+**[Download murmur for macOS](https://github.com/H0tP0cket/oblivion/releases)**
 
 Requires **macOS 26 or later and Apple Silicon**, plus a ChatGPT account with Codex access. The app bundles Codex, so you do not need an API key, Terminal, Homebrew or developer tools. Your plan determines available models and usage limits.
 
-1. Download the DMG, open it, and drag MurMur to Applications.
-2. Open MurMur and choose **Sign in with ChatGPT**. Finish in your browser.
+1. Download the DMG, open it, and drag murmur to Applications.
+2. Open murmur and choose **Sign in with ChatGPT**. Finish in your browser.
 3. Prepare a chat. Start call requests audio permissions when you need them.
 
 This first release is a **preview, not Apple-notarized**. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. Follow [Apple’s instructions](https://support.apple.com/en-us/102445) and install only releases you trust. Full setup instructions are [here](docs/INSTALL.txt).
@@ -30,13 +30,13 @@ This first release is a **preview, not Apple-notarized**. If macOS blocks it, us
 
 Use **Create folder** below Search calls to group meetings with a person or company. New chats are named **Call 1**, **Call 2**, and so on within each folder. Edit any title directly in the chat header. Move existing chats using the row menu. Removing a folder keeps its calls.
 
-**Sync Google Calendar** reads calendars connected through **macOS Internet Accounts**, including Google. Connect Google there, enable Calendars, then choose calendars in MurMur. Home shows the next two weeks. **Prepare** attaches that event’s context to a new chat; **Open chat** returns to it. Calendar access is optional, stays on the Mac, and never edits events.
+**Sync Google Calendar** reads calendars connected through **macOS Internet Accounts**, including Google. Connect Google there, enable Calendars, then choose calendars in murmur. Home shows the next two weeks. **Prepare** attaches that event’s context to a new chat; **Open chat** returns to it. Calendar access is optional, stays on the Mac, and never edits events.
 
 ## Build from source
 
-With Swift tools and the macOS 26 SDK installed, run `scripts/install.sh`, then open `~/Applications/MurMur.app`. Quit MurMur before updating. The installer replaces the old Oblivion bundle while preserving existing data and sign-in. Run `scripts/test.sh` for tests or `scripts/release.sh --preview` to produce download assets. See [release instructions](docs/RELEASING.md) for signing and notarization.
+With Swift tools and the macOS 26 SDK installed, run `scripts/install.sh`, then open `~/Applications/murmur.app`. Quit murmur before updating. The installer replaces the old Oblivion bundle while preserving existing data and sign-in. Run `scripts/test.sh` for tests or `scripts/release.sh --preview` to produce download assets. See [release instructions](docs/RELEASING.md) for signing and notarization.
 
-## Using MurMur
+## Using murmur
 
 Use **+** to attach files, or paste screenshots and copied image files into the composer. Sent images leave the composer and stay on their original message; the × removes an unsent attachment. Click a thumbnail to preview it. Select across paragraphs in a response to copy text; **Copy** copies the full Markdown response.
 
@@ -54,4 +54,4 @@ Expand **AI notes** below your notepad and drag the divider to resize both secti
 
 Chats, attachments, and transcripts stay in `~/Library/Application Support/Oblivion`. Relevant text and attached images are sent to Codex for advice; raw audio is not saved. Share a specific tab or application window: full-display sharing can expose the HUD.
 
-MurMur has no developer-run backend or analytics. See [privacy details](docs/PRIVACY.md) and the [verification log](docs/TESTING.md) for tested flows and limitations. This project is independent of OpenAI. The bundled Codex runtime retains its [upstream license and notices](Resources/Licenses).
+murmur has no developer-run backend or analytics. See [privacy details](docs/PRIVACY.md) and the [verification log](docs/TESTING.md) for tested flows and limitations. This project is independent of OpenAI. The bundled Codex runtime retains its [upstream license and notices](Resources/Licenses).

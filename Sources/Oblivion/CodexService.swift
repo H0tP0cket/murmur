@@ -55,7 +55,7 @@ final class CodexService: ObservableObject {
 
     private func start() async throws {
         status = "Connecting…"
-        guard let executable = CodexRuntime.executable(override: executableURL) else { throw OblivionError.message("The bundled Codex runtime is missing. Reinstall MurMur or choose a Codex executable in Settings.") }
+        guard let executable = CodexRuntime.executable(override: executableURL) else { throw OblivionError.message("The bundled Codex runtime is missing. Reinstall murmur or choose a Codex executable in Settings.") }
         let proc = Process(), stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         proc.executableURL = executable
         proc.arguments = ["app-server"]
@@ -84,7 +84,7 @@ final class CodexService: ObservableObject {
         } }
         process = proc; input = stdin.fileHandleForWriting; buffer = Data()
         try proc.run()
-        _ = try await request("initialize", ["clientInfo": ["name": "murmur", "title": "MurMur", "version": "0.2.0"], "capabilities": ["experimentalApi": true]])
+        _ = try await request("initialize", ["clientInfo": ["name": "murmur", "title": "murmur", "version": "0.2.0"], "capabilities": ["experimentalApi": true]])
         try send(["method": "initialized"])
         try await refreshAccount()
     }

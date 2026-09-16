@@ -14,7 +14,7 @@ import Testing
     state.windows.mainWindow = main
     defer {
         state.windows.returnToChat()
-        for window in NSApp.windows where window.title == "MurMur · Call" {
+        for window in NSApp.windows where window.title == "murmur · Call" {
             window.contentView = nil; window.close()
         }
         main.close()
@@ -22,14 +22,14 @@ import Testing
     }
 
     state.windows.showHUD()
-    let hud = try #require(NSApp.windows.first { $0.title == "MurMur · Call" })
+    let hud = try #require(NSApp.windows.first { $0.title == "murmur · Call" })
     #expect(hud.isVisible && !main.isVisible)
     #expect(state.selectedID == other)
     state.windows.showCallNotes()
     #expect(hud.isVisible && main.isVisible)
     #expect(state.selectedID == call && state.detail == .notes)
     #expect(state.activeCallID == call && state.recommendation == recommendation)
-    #expect(!NSApp.windows.contains { $0.title == "MurMur · Notes" })
+    #expect(!NSApp.windows.contains { $0.title == "murmur · Notes" })
 
     state.editNotes(callID: call, text: "Ask who owns the pilot.\nKeep this exact note.")
     state.windows.toggleHUD()
