@@ -11,6 +11,7 @@ struct SpeechUpdate {
     var start: Double
     var end: Double
     var isFinal: Bool
+    var confidence: Double? = nil
 }
 
 @MainActor
@@ -33,11 +34,11 @@ final class SpeechPipeline {
         self.source = source; self.onResult = onResult; self.onError = onError
     }
 
-    func start() async throws {
+    func start(vocabulary: [String] = []) async throws {
         guard SpeechTranscriber.isAvailable else { throw OblivionError.message("On-device transcription isn’t available on this Mac.") }
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US")) else { throw OblivionError.message("English transcription is unavailable.") }
         try checkActive()
-        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults], attributeOptions: [.audioTimeRange])
+        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange, .transcriptionConfidence])
         if let installation = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) { try await installation.downloadAndInstall() }
         try checkActive()
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else { throw OblivionError.message("No compatible transcription audio format.") }
@@ -45,13 +46,18 @@ final class SpeechPipeline {
         self.format = format
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+        let context = AnalysisContext()
+        context.contextualStrings[.general] = vocabulary
+        try await analyzer.setContext(context)
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream(bufferingPolicy: .bufferingOldest(500))
         self.continuation = continuation
         resultsTask = Task { [weak self] in
             do {
                 for try await result in transcriber.results {
                     guard let self, !Task.isCancelled else { return }
-                    self.onResult(SpeechUpdate(source: source, text: String(result.text.characters), start: result.range.start.seconds, end: CMTimeRangeGetEnd(result.range).seconds, isFinal: result.isFinal))
+                    let scores = result.text.runs.compactMap { $0[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self] }
+                    let confidence = scores.isEmpty ? nil : Double(scores.reduce(0, +)) / Double(scores.count)
+                    self.onResult(SpeechUpdate(source: source, text: String(result.text.characters), start: result.range.start.seconds, end: CMTimeRangeGetEnd(result.range).seconds, isFinal: result.isFinal, confidence: confidence))
                 }
             } catch { if !Task.isCancelled { self?.onError("Transcription interrupted. \(error.localizedDescription)") } }
         }
@@ -140,6 +146,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
     @Published var meetingLevel: Double = 0
     @Published var isRunning = false
     @Published var localSpeaking = false
+    @Published var remoteSpeaking = false
     @Published var applications: [(id: String, name: String)] = []
     private(set) var startedAt = Date()
     var elapsedTime: Double { CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), hostStart).seconds }
@@ -154,12 +161,14 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
     private var meeting: SpeechPipeline?
     private var hostStart = CMTime.zero
     private var lastLocalVoice = Date.distantPast
+    private var lastRemoteVoice = Date.distantPast
     private var levelTimer: Timer?
     private var lastLevelUpdate: [String: Date] = [:]
     private var lastIssue = Date.distantPast
+    nonisolated private let processor = CaptureAudioProcessor()
     private let audioQueue = DispatchQueue(label: "dev.oblivion.capture", qos: .userInitiated)
 
-    func start(applicationID: String?, includeMicrophone: Bool = true) async throws {
+    func start(applicationID: String?, includeMicrophone: Bool = true, vocabulary: [String] = []) async throws {
         guard !isRunning else { return }
         let generation = UUID(); startID = generation; diagnosed.removeAll()
         status = "Allow microphone access if prompted…"
@@ -186,9 +195,9 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
         var attemptStream: SCStream?
         do {
             status = "Preparing on-device transcription…"
-            try await microphone?.start()
+            try await microphone?.start(vocabulary: vocabulary)
             try ensureCurrent(generation)
-            try await meeting.start()
+            try await meeting.start(vocabulary: vocabulary)
             try ensureCurrent(generation)
             let configuration = SCStreamConfiguration()
             configuration.width = 2; configuration.height = 2
@@ -202,6 +211,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
             if includeMicrophone { try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: audioQueue) }
             self.stream = stream
+            processor.begin(generation, streamID: ObjectIdentifier(stream))
             hostStart = CMClockGetTime(CMClockGetHostTimeClock())
             startedAt = Date()
             try await stream.startCapture()
@@ -211,6 +221,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
                 Task { @MainActor in
                     guard let self else { return }
                     let speaking = Date().timeIntervalSince(self.lastLocalVoice) < 0.9
+                    self.remoteSpeaking = Date().timeIntervalSince(self.lastRemoteVoice) < 0.9
                     if speaking != self.localSpeaking { self.localSpeaking = speaking; self.onSpeakingChanged(speaking) }
                     if Date().timeIntervalSince(self.lastLevelUpdate["microphone"] ?? .distantPast) > 1 { self.micLevel = 0 }
                     if Date().timeIntervalSince(self.lastLevelUpdate["meeting"] ?? .distantPast) > 1 { self.meetingLevel = 0 }
@@ -231,16 +242,18 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
     }
 
     func stop() async {
+        let generation = startID
         startID = nil
         status = "Finishing transcript…"
         levelTimer?.invalidate(); levelTimer = nil
         let stream = self.stream, microphone = self.microphone, meeting = self.meeting
         self.stream = nil
-        self.microphone = nil; self.meeting = nil
-        isRunning = false; localSpeaking = false; micLevel = 0; meetingLevel = 0
-        lastLocalVoice = .distantPast; lastLevelUpdate = [:]
+        isRunning = false; localSpeaking = false; remoteSpeaking = false; micLevel = 0; meetingLevel = 0
+        lastLocalVoice = .distantPast; lastRemoteVoice = .distantPast; lastLevelUpdate = [:]
         if let stream { try? await stream.stopCapture() }
+        if let generation { for frame in processor.finish(generation) { consume(frame.buffer, pts: frame.pts, source: frame.source) } }
         await microphone?.stop(); await meeting?.stop()
+        self.microphone = nil; self.meeting = nil
         if startID == nil { status = "Not listening" }
     }
 
@@ -252,10 +265,11 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
         buffer.frameLength = AVAudioFrameCount(sampleBuffer.numSamples)
         let result = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(sampleBuffer.numSamples), into: buffer.mutableAudioBufferList)
         guard result == noErr else { return }
-        let pts = sampleBuffer.presentationTimeStamp
+        let frames = processor.consume(buffer, pts: sampleBuffer.presentationTimeStamp, source: type == .microphone ? "microphone" : "meeting", streamID: ObjectIdentifier(stream))
+        guard !frames.isEmpty else { return }
         Task { @MainActor [weak self] in
             guard let self, self.stream === stream else { return }
-            self.consume(buffer, pts: pts, source: type == .microphone ? "microphone" : "meeting")
+            for frame in frames { self.consume(frame.buffer, pts: frame.pts, source: frame.source) }
         }
     }
 
@@ -279,6 +293,7 @@ final class AudioCapture: NSObject, ObservableObject, SCStreamOutput, SCStreamDe
             level = sqrt(sum / Double(buffer.frameLength))
         }
         if source == "microphone", level > 0.009 { lastLocalVoice = Date() }
+        if source == "meeting", level > 0.009 { lastRemoteVoice = Date() }
         if Date().timeIntervalSince(lastLevelUpdate[source] ?? .distantPast) > 0.12 {
             lastLevelUpdate[source] = Date()
             if source == "microphone" { micLevel = min(1, level * 8) } else { meetingLevel = min(1, level * 8) }

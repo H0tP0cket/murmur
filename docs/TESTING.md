@@ -30,3 +30,17 @@ Native macOS Accessibility actions and window screenshots were used because the 
 This is not a test on a second person's Mac. Password entry and a different user's ChatGPT subscription were not tested. Available models and account access depend on OpenAI. Live multi-participant Meet/Zoom attribution and sustained long meetings still need broader testing; unknown speakers remain generic. Full-display sharing can expose the HUD.
 
 There is no Developer ID certificate on the build Mac, so the notarized release path and ordinary Gatekeeper acceptance are unverified. Preview installation uses Apple's documented Open Anyway path. Calendar integration requires Google to be connected in macOS Internet Accounts and selected in murmur.
+
+## Live guidance and audio quality update
+
+The live-update regression checks cover conservative cross-source echo reconciliation in both arrival orders, negation/number preservation, manual corrections, confidence persistence, full-preparation chunk coverage and middle-section retrieval, confirmed-speech cadence, acknowledgement suppression, evidence IDs, stable main recommendations, and private one-off Ask requests. A local JSON-RPC server sends deliberately late replies after cancellation and before turn-start acknowledgement; dismissed answers cannot reappear and the next request remains independent.
+
+A deterministic eight-second adaptive-filter fixture uses delayed playback echo followed by simultaneous independent local speech. The residual echo energy was about 0.5% of the untreated echo in its measured converged interval, and simultaneous local speech retained about 99% of its reference energy. These are synthetic signal checks, not word-error rates or a claim about real room performance. Reordered capture buffers, real timestamp gaps, tail flushing, and stale session generations are checked separately.
+
+The real Apple SpeechAnalyzer fixture ran with accurate reporting, confidence attributes and a supplied vocabulary context. It finalized six passages and preserved the tested negation, review term and duration. Acceptance of the context does not establish how much vocabulary bias improves recognition.
+
+`MURMUR_LIVE_QUALITY_TEST=1 scripts/test.sh --filter realLiveCoachUsesConcreteEvidenceAndQuickHelpStaysShort` runs three fictional workflow/referral cases and one quick-help request through the actual Codex sidecar. The first run exposed a generic quick-help question; the prompt was revised to require a concrete recent detail and avoid assumed pain. A subsequent passing run produced specific follow-ups, with coaching responses around 6–10 seconds and quick help around 3 seconds. These are individual samples, not latency guarantees or a comprehensive quality benchmark.
+
+The production HUD was exercised in an isolated native UI fixture via macOS Accessibility and screenshots because the computer-use connector was unavailable. Ask was sent through real Codex, dismissed, and reopened empty. Testing caught a SwiftUI ideal-size expansion and the manual cursor override being reset by AppKit; the HUD now uses coordinator-owned sizing and native AppKit buttons with cursor rectangles and hover feedback. The original M artwork is retained unchanged.
+
+The remaining check is a sustained real conversation with the user's room, speakers/headphones, accent, turn-taking and meeting app. The earlier real-call transcript had no accompanying raw audio, so it cannot establish a word-error rate or validate acoustic cancellation retrospectively.

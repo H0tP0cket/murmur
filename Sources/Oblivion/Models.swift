@@ -43,6 +43,8 @@ struct TranscriptSegment: Codable, Identifiable, Equatable {
     var original: String
     var correction: String?
     var speakerEdited: Bool?
+    var confidence: Double?
+    var echoOf: UUID?
     var isFinal = true
     var text: String { correction ?? original }
     var timestamp: String {
@@ -83,6 +85,8 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var transcript: [TranscriptSegment] = []
     var sessions: [CallSession] = []
     var intro = ""
+    var liveBrief: LiveBrief?
+    var liveMemory: ConversationMemory?
     // Missing on older records: preserve their existing (possibly manual) name.
     var automaticTitlePending: Bool?
 
@@ -97,9 +101,9 @@ struct CallRecord: Codable, Identifiable, Equatable {
         return attachments.filter { !$0.isImage || pending.contains($0.id) }
     }
 
-    var transcriptText: String {
-        transcript.map { "[\($0.timestamp)] \($0.speaker)\($0.isFinal ? "" : " [partial]"): \($0.text)" }.joined(separator: "\n")
-    }
+    var cleanTranscript: [TranscriptSegment] { transcript.filter { $0.echoOf == nil || $0.speakerEdited == true || $0.correction != nil } }
+    var transcriptText: String { TranscriptQuality.text(cleanTranscript) }
+    var rawTranscriptText: String { TranscriptQuality.text(transcript.map { var original = $0; original.correction = nil; return original }) }
     var preparationText: String {
         let chat = messages.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n")
         let chatContext = chat.count > 32000 ? "\(chat.prefix(8000))\n\n[Middle of the preparation is stored in conversation.md.]\n\n\(chat.suffix(24000))" : chat

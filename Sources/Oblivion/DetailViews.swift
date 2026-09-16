@@ -9,6 +9,7 @@ struct DetailView: View {
     @State private var editingSegment: TranscriptSegment?
     @State private var editingNotes = false
     @State private var showingAINotes = false
+    @State private var showEchoPassages = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -31,7 +32,7 @@ struct DetailView: View {
                 }
             }
         }.background(OblivionStyle.canvas)
-            .onChange(of: state.selectedID) { _, _ in editingNotes = false; showingAINotes = false; state.flushNoteEdits() }
+            .onChange(of: state.selectedID) { _, _ in editingNotes = false; showingAINotes = false; showEchoPassages = false; state.flushNoteEdits() }
             .onDisappear { state.flushNoteEdits() }
             .sheet(item: $editingSegment) { segment in TranscriptEditor(segment: segment) { text, speaker in
                 if let id = state.selectedID { state.editTranscript(callID: id, segmentID: segment.id, text: text, speaker: speaker) }
@@ -116,16 +117,18 @@ struct DetailView: View {
     }
 
     private func transcript(_ call: CallRecord) -> some View {
-        VStack(spacing: 12) {
+        let clean = call.cleanTranscript
+        let passages = showEchoPassages ? call.transcript : clean
+        return VStack(spacing: 12) {
             if call.transcript.isEmpty {
                 ContentUnavailableView("Your conversation, captured", systemImage: "waveform", description: Text("Start a call to transcribe on this Mac, or import a transcript."))
                 Button("Import transcript…") { state.importTranscript() }.padding(.bottom, 20)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
-                        ForEach(call.transcript.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) || $0.speaker.localizedCaseInsensitiveContains(search) }) { segment in
+                        ForEach(passages.filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) || $0.speaker.localizedCaseInsensitiveContains(search) }) { segment in
                             VStack(alignment: .leading, spacing: 6) {
-                                HStack { Text(segment.timestamp).monospacedDigit(); Text(segment.speaker).fontWeight(.medium); Spacer(); if !segment.isFinal { Text("live") } }
+                                HStack { Text(segment.timestamp).monospacedDigit(); Text(segment.speaker).fontWeight(.medium); Spacer(); if !segment.isFinal { Text("live") }; if segment.echoOf != nil { Text("Echo copy") }; if (segment.confidence ?? 1) < 0.65 { Text("Check wording").help("Speech recognition was uncertain. The original wording is preserved.") } }
                                     .font(.system(size: 10)).foregroundStyle(.secondary)
                                 Text(segment.text).font(.system(size: 13)).lineSpacing(4).textSelection(.enabled).foregroundStyle(segment.isFinal ? .primary : .secondary)
                                 HStack {
@@ -138,7 +141,15 @@ struct DetailView: View {
                         ForEach(call.sessions.flatMap(\.interruptions), id: \.self) { issue in Label(issue, systemImage: "exclamationmark.triangle").font(.system(size: 11)).foregroundStyle(.orange) }
                     }.padding(.horizontal, 20).padding(.bottom, 24)
                 }.defaultScrollAnchor(.bottom)
-                HStack { Text("\(call.transcript.count) passages"); Spacer(); Button("Export") { state.exportCall() } }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 15)
+                HStack {
+                    Text("\(passages.count) passages")
+                    Spacer()
+                    if clean.count != call.transcript.count {
+                        Toggle("Show echo copies", isOn: $showEchoPassages).toggleStyle(.checkbox).controlSize(.mini)
+                            .help("Inspect preserved microphone copies. Editing one keeps it in the transcript.")
+                    }
+                    Button("Export") { state.exportCall() }
+                }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 15)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

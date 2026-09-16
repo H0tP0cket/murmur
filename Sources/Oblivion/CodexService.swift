@@ -194,7 +194,7 @@ final class CodexService: ObservableObject {
         return id
     }
 
-    func run(threadID: String, text: String, images: [URL] = [], live: Bool = false, modelOverride: String? = nil, effortOverride: String? = nil, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
+    func run(threadID: String, text: String, images: [URL] = [], live: Bool = false, modelOverride: String? = nil, effortOverride: String? = nil, timeoutSeconds: Double? = nil, schema: [String: Any]? = nil, onText: @escaping (String) -> Void = { _ in }, onStatus: @escaping (String) -> Void = { _ in }) async throws -> String {
         try Task.checkCancellation()
         guard turns[threadID] == nil else { throw OblivionError.message("This conversation is still responding.") }
         let selection = try turnSelection(live: live, modelOverride: modelOverride, effortOverride: effortOverride)
@@ -218,7 +218,12 @@ final class CodexService: ObservableObject {
                         if let effort = selection.effort { params["effort"] = effort }
                         if let schema { params["outputSchema"] = schema }
                         let result = try await request("turn/start", params)
-                        guard turns[threadID] === waiter else { return }
+                        guard turns[threadID] === waiter else {
+                            if waiter.cancelled, let turnID = (result["turn"] as? [String: Any])?["id"] as? String {
+                                _ = try? await request("turn/interrupt", ["threadId": threadID, "turnId": turnID])
+                            }
+                            return
+                        }
                         waiter.turnID = (result["turn"] as? [String: Any])?["id"] as? String
                         guard waiter.turnID != nil else { throw OblivionError.message("Codex didn’t identify this response.") }
                         let queued = waiter.queuedEvents; waiter.queuedEvents = []
@@ -227,11 +232,12 @@ final class CodexService: ObservableObject {
                     } catch { if turns[threadID] === waiter { finish(threadID, .failure(error)) } }
                 }
                 waiter.timeout = Task { [weak self, weak waiter] in
-                    do { try await Task.sleep(for: .seconds(live ? 60 : (["high", "xhigh", "max", "ultra"].contains(selection.effort ?? "") ? 900 : 240))) } catch { return }
+                    do { try await Task.sleep(for: .seconds(timeoutSeconds ?? (live ? 60 : (["high", "xhigh", "max", "ultra"].contains(selection.effort ?? "") ? 900 : 240)))) } catch { return }
                     guard let self, let waiter else { return }
                     if self.turns[threadID] === waiter {
-                        await self.cancel(threadID: threadID)
-                        if self.turns[threadID] === waiter { self.finish(threadID, .failure(OblivionError.message("Codex took too long. Your context is saved; try again."))) }
+                        waiter.cancelled = true
+                        self.finish(threadID, .failure(OblivionError.message("Codex took too long. Try again.")))
+                        if let turnID = waiter.turnID { _ = try? await self.request("turn/interrupt", ["threadId": threadID, "turnId": turnID]) }
                     }
                 }
             }
@@ -241,9 +247,11 @@ final class CodexService: ObservableObject {
     func cancel(threadID: String, requestID: UUID? = nil) async {
         guard let waiter = turns[threadID], requestID == nil || waiter.requestID == requestID else { return }
         waiter.cancelled = true
+        // Clear the local turn immediately, even if turn/start or interrupt is slow.
+        // A late start reply is interrupted above and can never revive this waiter.
+        finish(threadID, .failure(CancellationError()))
         if let turnID = waiter.turnID {
             _ = try? await request("turn/interrupt", ["threadId": threadID, "turnId": turnID])
-            if turns[threadID] === waiter { finish(threadID, .failure(CancellationError())) }
         }
     }
 

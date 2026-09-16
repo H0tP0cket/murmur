@@ -49,6 +49,12 @@ final class AppState: ObservableObject {
     private var pendingSummaries: Set<UUID> = []
     private var directTask: Task<Void, Never>?
     private var directThread: String?
+    private var directGeneration = UUID()
+    private var directWarmTask: Task<Void, Never>?
+    private var briefTask: Task<Void, Never>?
+    private var briefFingerprint: String?
+    private var cadence = CoachingCadence()
+    private var lastSpeech = Date.distantPast
     private var coachTurns = 0
     private var coachPreparationHash: Int?
     private var coachSentTranscript: [TranscriptSegment] = []
@@ -157,15 +163,18 @@ final class AppState: ObservableObject {
             record.transcript[index].correction = text == record.transcript[index].original ? nil : text
             record.transcript[index].speaker = speaker
             record.transcript[index].speakerEdited = true
+            TranscriptQuality.reconcile(&record, session: record.transcript[index].sessionID, around: record.transcript[index].start)
         }
         if activeCallID == callID {
             transcriptRevision += 1; transcriptEditGeneration += 1
-            pendingRecommendation = nil
+            pendingRecommendation = nil; coachThread = nil
+            modify(callID) { $0.liveMemory = nil }
         }
     }
 
     func acceptRecommendation(_ next: Recommendation) {
         recommendation.coaching = next.coaching
+        guard next.kind != "LISTEN" else { return }
         if audio.localSpeaking || recommendationPinned { pendingRecommendation = next }
         else { recommendation = next; pendingRecommendation = nil }
     }
@@ -348,25 +357,37 @@ final class AppState: ObservableObject {
         recommendation = Recommendation(kind: "CUE CARD", coaching: "Your exact wording. Pinned until you release it.", answer: story.body, storyID: story.id.uuidString)
     }
 
-    func startCall(popOut: Bool = true) async {
-        guard activeCallID == nil, !callStarting else { if popOut { windows.showHUD() }; return }
-        let id = selectedID ?? newCall()
+    /// Session bookkeeping is separate from device startup so interrupted capture
+    /// can be unwound consistently without touching preparation or drafts.
+    @discardableResult
+    func beginLiveSession(callID id: UUID) -> CallSession {
+        dismissDirectQuestion()
+        cadence = CoachingCadence(); lastSpeech = .distantPast
         callStarting = true; showCallSetup = false; activeCallID = id
         let session = CallSession(); activeSession = session.id
         modify(id) { $0.sessions.append(session) }
         recommendation = Recommendation(kind: "INTRO", coaching: "Getting ready to listen.", answer: selected?.intro.isEmpty == false ? selected!.intro : "Preparing your opening from this conversation…")
         transcriptRevision = 0; coachedRevision = -1; coachTurns = 0; coachPreparationHash = nil; notesRevision = 0; lastNotes = Date(); recommendationPinned = false; coachThread = nil; pendingRecommendation = nil; directAnswer = ""
+        return session
+    }
+
+    func startCall(popOut: Bool = true) async {
+        guard activeCallID == nil, !callStarting else { if popOut { windows.showHUD() }; return }
+        let id = selectedID ?? newCall()
+        let session = beginLiveSession(callID: id)
+        if let call = activeCall { prepareLiveBrief(call) }
+        warmDirectQuestion()
         UserDefaults.standard.set(audioSource, forKey: "audioSource")
         UserDefaults.standard.set(includeMicrophone, forKey: "includeMicrophone")
         do {
-            try await audio.start(applicationID: audioSource.isEmpty ? nil : audioSource, includeMicrophone: includeMicrophone)
+            try await audio.start(applicationID: audioSource.isEmpty ? nil : audioSource, includeMicrophone: includeMicrophone, vocabulary: activeCall.map { CallVocabulary.extract(LiveContext.source($0, background: personalBackground)) } ?? [])
             guard activeSession == session.id else { return }
             callStarting = false
             modify(id) { record in if let index = record.sessions.firstIndex(where: { $0.id == session.id }) { record.sessions[index].startedAt = audio.startedAt } }
             attribution.start(root: library.root, session: session.id, source: audioSource, elapsedTime: { [weak audio] in audio?.elapsedTime ?? 0 })
             if popOut { windows.showHUD() }
             requestCoaching(force: true)
-            coachTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestCoaching()
+            coachTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestCoaching()
                 if let self, let id = self.activeCallID, Date().timeIntervalSince(self.lastNotes) > 60, self.transcriptRevision - self.notesRevision > 8 { self.updateNotes(callID: id) }
             } }
             windows.installShortcuts()
@@ -375,6 +396,7 @@ final class AppState: ObservableObject {
             if !(error is CancellationError) { self.error = error.localizedDescription; captureIssue(error.localizedDescription) }
             await audio.stop()
             modify(id) { record in if let index = record.sessions.firstIndex(where: { $0.id == session.id }) { record.sessions[index].endedAt = Date() } }
+            dismissDirectQuestion(); briefTask?.cancel(); briefTask = nil; briefFingerprint = nil
             activeCallID = nil; activeSession = nil; callStarting = false
         }
     }
@@ -390,7 +412,7 @@ final class AppState: ObservableObject {
     private func finishCall(summarize: Bool) async {
         guard let id = activeCallID, !callEnding else { return }
         let sessionID = activeSession
-        callEnding = true; coachTimer?.invalidate(); coachTimer = nil; coachTask?.cancel(); directTask?.cancel()
+        callEnding = true; dismissDirectQuestion(); briefTask?.cancel(); briefTask = nil; briefFingerprint = nil; coachTimer?.invalidate(); coachTimer = nil; coachTask?.cancel(); directTask?.cancel()
         // A stalled inference sidecar must never delay stopping capture.
         if let directThread { Task { await codex.cancel(threadID: directThread) } }
         if let coachThread { Task { await codex.cancel(threadID: coachThread) } }
@@ -406,6 +428,7 @@ final class AppState: ObservableObject {
 
     func receiveSpeech(_ update: SpeechUpdate) {
         guard let id = activeCallID, let session = activeSession, !update.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lastSpeech = Date()
         let speaker = update.source == "microphone" ? "You" : (attribution.speaker(start: update.start, end: update.end) ?? "Meeting")
         modify(id, { call in
             TranscriptIngestor.apply(update, speaker: speaker, session: session, to: &call)
@@ -419,72 +442,150 @@ final class AppState: ObservableObject {
         modify(id) { call in if let index = call.sessions.firstIndex(where: { $0.id == session }) { call.sessions[index].interruptions.append(issue) } }
     }
 
+    private var personalBackground: String { UserDefaults.standard.string(forKey: "personalBackground") ?? "" }
+
+    private func prepareLiveBrief(_ call: CallRecord) {
+        let source = LiveContext.source(call, background: personalBackground)
+        let fingerprint = LiveContext.fingerprint(source)
+        guard call.liveBrief?.fingerprint != fingerprint, briefFingerprint != fingerprint else { return }
+        briefTask?.cancel(); briefFingerprint = fingerprint
+        briefTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if briefFingerprint == fingerprint { briefTask = nil; briefFingerprint = nil } }
+            do {
+                let thread = try await codex.thread(cwd: library.directory(call.id), live: true, instructions: LiveContext.briefInstructions)
+                var brief = ""
+                for (index, chunk) in LiveContext.chunks(source).enumerated() {
+                    try Task.checkCancellation()
+                    brief = try await codex.run(threadID: thread, text: "Merge preparation part \(index + 1) into the complete brief.\nPREVIOUS BRIEF\n\(brief)\nNEXT SOURCE CHUNK\n\(chunk)", live: true)
+                    brief = String(brief.prefix(9000))
+                }
+                guard !Task.isCancelled, let current = calls.first(where: { $0.id == call.id }), LiveContext.fingerprint(LiveContext.source(current, background: personalBackground)) == fingerprint else { return }
+                modify(call.id) { $0.liveBrief = LiveBrief(fingerprint: fingerprint, text: brief) }
+            } catch is CancellationError { }
+            catch { if activeCallID == call.id { coachingStatus = "Using preparation excerpts while the full brief is unavailable." } }
+        }
+    }
+
     func requestCoaching(force: Bool = false, question: String? = nil) {
-        guard let call = activeCall, !callEnding, !callStarting, !coachingBusy else { return }
-        guard force || (transcriptRevision != coachedRevision && Date().timeIntervalSince(lastCoach) > 2) else { return }
-        coachingBusy = true; lastCoach = Date(); let revision = transcriptRevision
-        let callID = call.id, sessionID = activeSession, editGeneration = transcriptEditGeneration
-        let needsIntroduction = coachTurns == 0 && !call.transcript.contains { $0.sessionID == sessionID }
-        coachingStatus = question == nil ? "Listening and thinking…" : "Looking that up…"
+        if let question { directQuestion = question; showDirectQuestion = true; askDirect(); return }
+        guard let call = activeCall, let sessionID = activeSession, !callEnding, !callStarting, !coachingBusy else { return }
+        let stable = call.cleanTranscript.filter { $0.sessionID == sessionID && $0.isFinal }
+        guard cadence.shouldRequest(stable, now: Date(), lastSpeech: lastSpeech, force: force) else { return }
+        cadence.mark(stable, now: Date())
+        coachingBusy = true; lastCoach = Date()
+        let revision = transcriptRevision, editGeneration = transcriptEditGeneration
+        let needsIntroduction = stable.isEmpty && coachTurns == 0
+        prepareLiveBrief(call)
+        coachingStatus = "Listening and thinking…"
         coachTask = Task { [weak self] in
             guard let self else { return }
             defer { if activeSession == sessionID { coachingBusy = false } }
+            let began = Date()
+            var input = ""
             do {
-                let preparationHash = (call.preparationText + (UserDefaults.standard.string(forKey: "personalBackground") ?? "")).hashValue
-                if coachTurns >= 16 || coachPreparationHash != preparationHash { coachThread = nil; coachTurns = 0 }
-                let isFreshThread = coachThread == nil
+                let source = LiveContext.source(call, background: personalBackground)
+                let preparationHash = (source + (call.liveBrief?.text ?? "") + LiveContext.cueCards(call)).hashValue
+                if coachTurns >= 12 || coachPreparationHash != preparationHash { coachThread = nil; coachTurns = 0 }
+                let fresh = coachThread == nil
                 let thread: String
                 if let coachThread { thread = coachThread } else {
-                    thread = try await codex.thread(cwd: library.directory(callID), live: true)
+                    thread = try await codex.thread(cwd: library.directory(call.id), live: true, instructions: LiveContext.coachInstructions)
                     guard activeSession == sessionID, !Task.isCancelled else { return }
-                    coachThread = thread; coachPreparationHash = preparationHash; coachSentTranscript = []
+                    coachThread = thread; coachPreparationHash = preparationHash
                 }
-                // Retain preparation in the thread and send only new/revised speech
-                // between rotations. Repeating the entire call every few seconds
-                // inflates latency and consumes context during long meetings.
-                let prior = Dictionary(uniqueKeysWithValues: coachSentTranscript.map { ($0.id, $0) })
-                let currentIDs = Set(call.transcript.map(\.id))
-                let removed = prior.keys.filter { !currentIDs.contains($0) }.map { "[segment \($0)] Removed or merged: disregard its previous standalone wording." }
-                let changed = call.transcript.filter { prior[$0.id] != $0 }.map { "[segment \($0.id), \($0.timestamp)] \($0.speaker)\($0.isFinal ? "" : " [partial]"): \($0.text)" }
-                let updates = (removed + changed).joined(separator: "\n")
-                let preparation = isFreshThread ? "\(call.preparationText)\n\nUSER BACKGROUND:\n\(UserDefaults.standard.string(forKey: "personalBackground") ?? "")\n\n" : ""
-                let text = "\(preparation)TRANSCRIPT UPDATES (replace earlier versions with the same segment ID; use preparation already in this thread):\n\(updates.suffix(26000))\n\nLIVE STATE: \(audio.localSpeaking ? "The user is speaking." : "The user is listening or there is a pause.")\n\n\(question.map { "THE USER ASKS YOU DIRECTLY: \($0)" } ?? (needsIntroduction ? "This is the start of a new call session. Prepare the opening introduction now." : "Give the one best next recommendation now."))"
-                let result = try await codex.run(threadID: thread, text: text, images: isFreshThread ? library.imageURLs(for: call) : [], live: true, schema: Recommendation.schema)
-                guard activeCallID == callID, activeSession == sessionID, !callEnding, !Task.isCancelled, transcriptEditGeneration == editGeneration else { return }
-                let cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
-                var next = try JSONDecoder().decode(Recommendation.self, from: Data(cleaned.utf8)).resolvingMustSay(from: activeCall?.stories ?? [])
-                if next.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    next.answer = next.kind == "LISTEN" ? "Let them finish their thought." : recommendation.answer
+                let recent = Array(stable.suffix(36))
+                let recentText = TranscriptQuality.text(recent, includeIDs: true)
+                let prep = fresh ? LiveContext.preparation(call, background: personalBackground, query: recentText) : "Use the preparation already supplied in this thread."
+                input = "\(prep)\nCONVERSATION MEMORY\n\((call.liveMemory ?? ConversationMemory()).text)\nRECENT CONFIRMED SPEECH\n\(recentText)\nCURRENT USER NOTES\n\(call.notes.suffix(4000))\nVISIBLE RECOMMENDATION (not necessarily spoken)\n\(recommendation.answer)\nLIVE STATE\n\(audio.localSpeaking ? "The user is speaking. Keep the main answer stable; offer brief coaching only when useful." : audio.remoteSpeaking ? "The counterpart is developing their thought. Prepare a useful next question without encouraging interruption." : "A pause or turn boundary.")\n\(needsIntroduction ? "Prepare the opening introduction now." : "Update memory and choose a grounded next step, or LISTEN if no better recommendation is warranted.")"
+                let result = try await codex.run(threadID: thread, text: input, live: true, effortOverride: "low", schema: LiveCoachingResult.schema)
+                guard activeSession == sessionID, !callEnding, !Task.isCancelled, transcriptEditGeneration == editGeneration else { return }
+                let response = try JSONDecoder().decode(LiveCoachingResult.self, from: Data(result.utf8))
+                let grounded = response.grounded(in: recent, introduction: needsIntroduction)
+                let latest = activeCall?.cleanTranscript.last(where: { $0.isFinal && $0.sessionID == sessionID })?.end ?? 0
+                let stale = latest - (stable.last?.end ?? 0) > 20
+                var next = response.recommendation.resolvingMustSay(from: activeCall?.stories ?? [])
+                // An invalid story ID must not bypass grounding after resolution.
+                let validCard = response.recommendation.storyID == nil || next.storyID != nil
+                let empty = next.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && next.kind != "LISTEN"
+                let disposition = stale ? "superseded" : (!grounded || !validCard || empty) ? "rejected" : "accepted"
+                if !stale {
+                    modify(call.id) { $0.liveMemory = response.memory.bounded }
+                    if disposition == "accepted" {
+                        if next.kind == "LISTEN" { next.answer = "" }
+                        acceptRecommendation(next)
+                        if next.kind == "INTRO" { modify(call.id) { $0.intro = next.answer } }
+                    }
                 }
-                if question != nil { directAnswer = next.answer }
-                else {
-                    acceptRecommendation(next)
-                    if next.kind == "INTRO" { modify(callID) { $0.intro = next.answer } }
-                }
-                coachTurns += 1; coachedRevision = revision; coachSentTranscript = call.transcript; coachingStatus = ""
+                library.appendGuidance(GuidanceEvent(sessionID: sessionID, kind: "coach", input: input, recommendation: next, disposition: disposition, latency: Date().timeIntervalSince(began)), callID: call.id)
+                coachTurns += 1; coachedRevision = revision; coachingStatus = ""
             } catch is CancellationError { }
-            catch { if activeSession == sessionID { coachingStatus = "Coaching paused. \(error.localizedDescription)"; coachThread = nil } }
+            catch {
+                if activeSession == sessionID {
+                    coachingStatus = "Coaching paused. \(error.localizedDescription)"; coachThread = nil; cadence.retry()
+                    library.appendGuidance(GuidanceEvent(sessionID: sessionID, kind: "coach", input: input, disposition: "failed", latency: Date().timeIntervalSince(began)), callID: call.id)
+                }
+            }
+        }
+    }
+
+    func openDirectQuestion() {
+        guard activeCallID != nil, !callEnding else { return }
+        showDirectQuestion = true
+        warmDirectQuestion()
+    }
+
+    func dismissDirectQuestion() {
+        directGeneration = UUID()
+        directTask?.cancel(); directTask = nil
+        directWarmTask?.cancel(); directWarmTask = nil
+        let thread = directThread; directThread = nil
+        if let thread { Task { await codex.cancel(threadID: thread) } }
+        showDirectQuestion = false; directQuestion = ""; directAnswer = ""; directBusy = false
+    }
+
+    private func warmDirectQuestion() {
+        guard directThread == nil, directWarmTask == nil, let call = activeCall else { return }
+        let generation = directGeneration
+        directWarmTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if directGeneration == generation { directWarmTask = nil } }
+            do {
+                let thread = try await codex.thread(cwd: library.directory(call.id), live: true, instructions: LiveContext.quickInstructions)
+                guard !Task.isCancelled, directGeneration == generation, activeCallID == call.id else { return }
+                directThread = thread
+            } catch { } // A failed warm-up is retried on submit.
         }
     }
 
     func askDirect() {
         let question = directQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, let call = activeCall, !directBusy, !callEnding else { return }
-        let sessionID = activeSession
+        guard !question.isEmpty, let call = activeCall, let sessionID = activeSession, !directBusy, !callEnding else { return }
+        showDirectQuestion = true
+        let generation = directGeneration
         directQuestion = ""; directAnswer = ""; directBusy = true
-        directTask = Task {
-            defer { if activeSession == sessionID { directBusy = false; directThread = nil } }
+        directTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if directGeneration == generation { directBusy = false; directThread = nil; directTask = nil } }
             do {
-                let thread = try await codex.thread(cwd: library.directory(call.id), ephemeral: true)
-                guard activeSession == sessionID, !Task.isCancelled else { return }
+                if let warm = directWarmTask { await warm.value }
+                try Task.checkCancellation()
+                let thread: String
+                if let directThread { thread = directThread }
+                else { thread = try await codex.thread(cwd: library.directory(call.id), live: true, instructions: LiveContext.quickInstructions) }
+                guard activeSession == sessionID, directGeneration == generation, !Task.isCancelled else { return }
                 directThread = thread
-                let prompt = "Answer this private question during the user's call, concisely but fully enough to use. You may read transcript.txt in this workspace for the ENTIRE call, and preparation.md and attachments for source details. The recent excerpt below is not the whole conversation. Use tools only when needed. Do not send messages or modify files.\n\nQUESTION:\n\(question)\n\nPREPARATION:\n\(call.preparationText)\n\nRECENT TRANSCRIPT:\n\(call.transcriptText.suffix(12000))"
-                let result = try await codex.run(threadID: thread, text: prompt, images: library.imageURLs(for: call), live: true, onText: { [weak self] text in
-                    guard let self, self.activeSession == sessionID, !self.callEnding else { return }; self.directAnswer = text
-                })
-                if activeSession == sessionID { directAnswer = result }
+                // Snapshot AFTER warm-up so the answer reflects what is happening now.
+                let current = activeCall ?? call
+                let recent = Array(current.cleanTranscript.filter { $0.sessionID == sessionID }.suffix(18))
+                let prompt = "QUESTION\n\(question)\n\(LiveContext.preparation(current, background: personalBackground, query: question + " " + TranscriptQuality.text(Array(recent.suffix(4))), quick: true))\nCONVERSATION MEMORY\n\((current.liveMemory ?? ConversationMemory()).text)\nRECENT SPEECH (partials are tentative)\n\(TranscriptQuality.text(recent))\nAnswer the immediate question in one useful sentence."
+                let result = try await codex.run(threadID: thread, text: prompt, live: true, timeoutSeconds: 12, schema: LiveContext.quickSchema)
+                guard activeSession == sessionID, directGeneration == generation, showDirectQuestion, !Task.isCancelled, !callEnding else { return }
+                struct Answer: Decodable { var answer: String }
+                let answer = try JSONDecoder().decode(Answer.self, from: Data(result.utf8)).answer
+                directAnswer = answer.split(whereSeparator: \.isWhitespace).prefix(55).joined(separator: " ")
             } catch is CancellationError { }
-            catch { if activeSession == sessionID { directAnswer = "I couldn’t finish that answer. \(error.localizedDescription)" } }
+            catch { if directGeneration == generation, showDirectQuestion { directAnswer = "Couldn’t get that answer. Try again." } }
         }
     }
 }

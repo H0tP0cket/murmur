@@ -25,7 +25,12 @@ final class WindowCoordinator {
             panel.standardWindowButton(.closeButton)?.isHidden = true
             panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
             panel.standardWindowButton(.zoomButton)?.isHidden = true
-            panel.contentView = NSHostingView(rootView: HUDView().environmentObject(state))
+            let hosting = NSHostingView(rootView: HUDView().environmentObject(state))
+            // The coordinator owns panel sizing. SwiftUI's ideal ScrollView size
+            // must not expand this floating window when Quick help appears.
+            hosting.sizingOptions = []
+            panel.acceptsMouseMovedEvents = true
+            panel.contentView = hosting
             self.panel = panel
             if let screen = mainWindow?.screen ?? NSScreen.main {
                 panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - 310, y: screen.visibleFrame.maxY - 390))
@@ -41,12 +46,13 @@ final class WindowCoordinator {
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 7
         let textHeight = (state.recommendation.answer as NSString).boundingRect(with: NSSize(width: width - 52, height: 1600), options: [.usesLineFragmentOrigin], attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .medium), .paragraphStyle: paragraph]).height
         let screenHeight = panel.screen?.visibleFrame.height ?? 800
-        let height = min(screenHeight - 70, max(270, min(screenHeight * 0.8, textHeight + 200)) + (state.showDirectQuestion ? 160 : 0))
+        let height = min(screenHeight - 70, max(270, min(screenHeight * 0.8, textHeight + 200)) + (state.showDirectQuestion ? (state.directAnswer.isEmpty ? 60 : 120) : 0))
         var frame = panel.frame; frame.origin.y += frame.height - height; frame.size.height = height
         panel.setFrame(frame, display: true, animate: false)
     }
 
     func returnToChat() {
+        state?.dismissDirectQuestion()
         state?.flushNoteEdits()
         panel?.orderOut(nil); state?.hudVisible = false
         revealMainWindow()
@@ -55,14 +61,21 @@ final class WindowCoordinator {
     func toggleHUD() {
         guard let state, state.activeCallID != nil else { return }
         if state.hudVisible {
+            state.dismissDirectQuestion()
             panel?.orderOut(nil); state.flushNoteEdits(); state.hudVisible = false
         } else { showHUD(hideMainWindow: false) }
     }
 
     func ask() {
         guard let state, state.activeCallID != nil else { return }
-        state.showDirectQuestion = true
+        state.openDirectQuestion()
         showHUD(hideMainWindow: false); panel?.makeKeyAndOrderFront(nil)
+    }
+
+    func dismissAsk() {
+        state?.dismissDirectQuestion()
+        panel?.makeFirstResponder(nil)
+        panel?.resignKey()
     }
 
     func showCallNotes() {
@@ -117,8 +130,8 @@ struct HUDView: View {
                 Text("LIVE").font(.system(size: 10, weight: .semibold)).tracking(1)
                 Text(state.recommendation.coaching).font(.system(size: 12)).lineLimit(2)
                 Spacer(minLength: 6)
-                Button { state.windows.toggleHUD() } label: { Image(systemName: "eye.slash") }.help("Hide · ⌘⇧Space")
-            }.buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 23).padding(.top, 20).padding(.bottom, 13)
+                HUDAction(symbol: "eye.slash", label: "Hide", hint: "Hide · ⌘⇧Space", action: { state.windows.toggleHUD() })
+            }.foregroundStyle(.secondary).padding(.horizontal, 23).padding(.top, 20).padding(.bottom, 13)
             Divider().opacity(0.5)
             HStack { Text(state.recommendation.kind).font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary); Spacer(); if state.audio.localSpeaking || state.recommendationPinned { Text(state.recommendationPinned ? "Pinned" : "Holding your answer").font(.system(size: 10)).foregroundStyle(.tertiary) } }.padding(.horizontal, 24).padding(.top, 19)
             ScrollView { Text(state.recommendation.answer).font(.system(size: 20, weight: .medium)).lineSpacing(7).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 9).padding(.bottom, 14) }.frame(maxHeight: .infinity)
@@ -126,26 +139,35 @@ struct HUDView: View {
             if state.showDirectQuestion {
                 Divider().opacity(0.5)
                 VStack(alignment: .leading, spacing: 9) {
-                    HStack { TextField("Ask about this call…", text: $state.directQuestion).textFieldStyle(.plain).focused($inputFocused).onSubmit { state.askDirect() }; Button { state.askDirect() } label: { Image(systemName: "arrow.up.circle.fill") }.disabled(state.directBusy); Button { state.showDirectQuestion = false } label: { Image(systemName: "xmark") } }.buttonStyle(.plain).font(.system(size: 13))
-                    if state.directBusy { ProgressView().controlSize(.small) }
-                    if !state.directAnswer.isEmpty { ScrollView { Text(.init(state.directAnswer)).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 120) }
+                    HStack(spacing: 6) {
+                        TextField("Quick help…", text: $state.directQuestion)
+                            .textFieldStyle(.plain).focused($inputFocused)
+                            .onSubmit { state.askDirect() }
+                            .accessibilityLabel("Quick help question")
+                        if state.directBusy { ProgressView().controlSize(.small).frame(width: 24) }
+                        else {
+                            HUDAction(symbol: "arrow.up", label: "Send quick help", hint: "Get quick help", enabled: !state.directQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: { state.askDirect() })
+                        }
+                        HUDAction(symbol: "xmark", label: "Dismiss quick help", hint: "Dismiss quick help · Esc", action: { state.windows.dismissAsk() })
+                    }.font(.system(size: 13))
+                    if !state.directAnswer.isEmpty {
+                        Text(state.directAnswer).font(.system(size: 14)).lineSpacing(3)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }.padding(.horizontal, 24).padding(.vertical, 13)
             }
             Divider().opacity(0.5)
-            HStack(spacing: 17) {
-                Button { state.windows.returnToChat() } label: { Label("Chat", systemImage: "arrow.down.left") }.help("Return to chat · ⌘⇧X")
-                Button { state.windows.showCallNotes() } label: { Label("Notes", systemImage: "square.and.pencil") }.help("Open chat and notes while keeping live guidance visible").accessibilityLabel("Open call notes")
-                Button { state.windows.ask() } label: { Label("Ask", systemImage: "sparkle") }.help("Ask copilot · ⌘K")
-                Button { state.recommendationPinned = false; state.requestCoaching(force: true) } label: { Image(systemName: "arrow.clockwise") }.disabled(state.coachingBusy).help("Get another recommendation")
-                Menu {
-                    Button(state.recommendationPinned ? "Unpin answer" : "Pin this answer") { state.recommendationPinned.toggle() }
-                    Divider()
-                    ForEach(state.activeCall?.stories.filter(\.approved) ?? []) { story in Button(story.displayTitle) { state.useStory(story) } }
-                } label: { Image(systemName: state.recommendationPinned ? "pin.fill" : "note.text") }.menuStyle(.borderlessButton).fixedSize().help("Cue cards · available offline")
+            HStack(spacing: 3) {
+                HUDAction(title: "Chat", symbol: "arrow.down.left", label: "Chat", hint: "Return to chat · ⌘⇧X", action: { state.windows.returnToChat() })
+                HUDAction(title: "Notes", symbol: "square.and.pencil", label: "Open call notes", hint: "Open chat and notes while keeping live guidance visible", action: { state.windows.showCallNotes() })
+                HUDAction(title: "Ask", symbol: "sparkle", label: "Ask", hint: "Quick help · ⌘⌥K", action: { state.windows.ask() })
+                HUDAction(symbol: "arrow.clockwise", label: "Refresh", hint: "Get another recommendation", enabled: !state.coachingBusy, action: { state.recommendationPinned = false; state.requestCoaching(force: true) })
+                HUDAction(symbol: state.recommendationPinned ? "pin.fill" : "note.text", label: "Cue cards", hint: "Cue cards · available offline", choices: [HUDMenuChoice(title: state.recommendationPinned ? "Unpin answer" : "Pin this answer", action: { state.recommendationPinned.toggle() })] + (state.activeCall?.stories.filter(\.approved) ?? []).map { story in HUDMenuChoice(title: story.displayTitle, action: { state.useStory(story) }) })
                 Spacer()
                 AudioLevelsView(audio: state.audio)
-                Button(state.callEnding ? "Ending…" : "End call") { Task { await state.endCall() } }.disabled(state.callEnding)
-            }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 13)
+                HUDAction(title: state.callEnding ? "Ending…" : "End call", label: "End call", hint: "End recording and live guidance", enabled: !state.callEnding, action: { Task { await state.endCall() } })
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 13)
         }
         .background(HUDSurface())
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -155,6 +177,8 @@ struct HUDView: View {
         .tint(OblivionStyle.accent)
         .onChange(of: state.recommendation.answer) { _, _ in state.windows.resizeHUD() }
         .onChange(of: state.showDirectQuestion) { _, shown in state.windows.resizeHUD(); inputFocused = shown }
+        .onChange(of: state.directAnswer) { _, _ in state.windows.resizeHUD() }
+        .onExitCommand { if state.showDirectQuestion { state.windows.dismissAsk() } }
         .onAppear { inputFocused = state.showDirectQuestion }
         .onKeyPress("k", phases: .down) { press in if press.modifiers.contains(.command) { state.windows.ask(); return .handled }; return .ignored }
     }

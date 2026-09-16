@@ -49,6 +49,7 @@ final class LibraryStore {
             return "## \(message.role.uppercased())\n\n\(message.text)\n\(images)"
         }.joined(separator: "\n\n")
         try conversation.write(to: folder.appendingPathComponent("conversation.md"), atomically: true, encoding: .utf8)
+        try record.rawTranscriptText.write(to: folder.appendingPathComponent("transcript-raw.txt"), atomically: true, encoding: .utf8)
         try record.transcriptText.write(to: folder.appendingPathComponent("transcript.txt"), atomically: true, encoding: .utf8)
     }
 
@@ -135,5 +136,27 @@ final class LibraryStore {
     func export(_ record: CallRecord, to url: URL) throws {
         let text = "# \(record.title)\n\n## Preparation\n\n\(record.preparationText)\n\n## Notes\n\n\(record.notes)\n\n\(record.generatedNotes)\n\n## Transcript\n\n\(record.transcriptText)"
         try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+extension LibraryStore {
+    /// Local diagnostics, bounded to two 12 MB files per call. The exact input
+    /// records only context available at that moment, allowing honest replay.
+    func appendGuidance(_ event: GuidanceEvent, callID: UUID) {
+        do {
+            let folder = directory(callID)
+            let url = folder.appendingPathComponent("guidance.jsonl")
+            let previous = folder.appendingPathComponent("guidance-previous.jsonl")
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+            var data = try encoder.encode(event); data.append(0x0a)
+            if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) + data.count > 12 * 1024 * 1024 {
+                try? FileManager.default.removeItem(at: previous)
+                if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.moveItem(at: url, to: previous) }
+            }
+            if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
+            let file = try FileHandle(forWritingTo: url)
+            defer { try? file.close() }
+            try file.seekToEnd(); try file.write(contentsOf: data)
+        } catch { /* Diagnostics must never stop a live call. */ }
     }
 }

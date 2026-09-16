@@ -195,7 +195,7 @@ import Testing
     let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
     var finals: [SpeechUpdate] = [], errors: [String] = []
     let pipeline = SpeechPipeline(source: "fixture", onResult: { if $0.isFinal { finals.append($0) } }, onError: { errors.append($0) })
-    try await pipeline.start()
+    try await pipeline.start(vocabulary: ["Guidewire", "ACORD", "Avery Quinn"])
     let sampleRate = file.processingFormat.sampleRate
     while file.framePosition < file.length {
         let position = file.framePosition

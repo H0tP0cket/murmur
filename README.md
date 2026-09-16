@@ -8,7 +8,7 @@ A native macOS copilot for better conversations. Prepare in a chat, get live coa
 - Per-chat model and reasoning effort controls, with buffered replies and selectable tables.
 - Home with upcoming meetings, person/company folders, and numbered calls with inline titles.
 - A floating HUD with one next recommendation, exact saved wording, and quick private questions.
-- On-device transcription of microphone and meeting audio.
+- On-device transcription with local echo cancellation, confidence hints, and reversible echo-copy filtering.
 - Searchable, editable transcripts and notes attached to each conversation.
 - SwiftUI + AppKit, a monochrome dark interface, and a glass sidebar.
 
@@ -47,6 +47,12 @@ Choose the model and reasoning effort inside the composer. The controls highligh
 In **Settings → Personal context**, expand **Build your context with ChatGPT** and copy the prompt to generate a factual first-person summary. Paste the result into your personal context to make it available across calls.
 
 **Save for call** opens **Cue cards** with two fields: **When to use it** and **What to say**. Keep perfected introductions, questions, pitches, and answers here. The live coach matches situations and paraphrases, then the app retrieves your exact saved wording. Existing saved wording remains available. This is priority context, not a separate model cache or a guarantee of perfect matching.
+
+**Ask** in the HUD is temporary quick help for the current moment. It uses a fresh, short, low-effort Codex request with recent speech and relevant preparation. The × or Escape cancels and clears it; hiding the HUD or returning to chat clears it too. Ask does not become a saved chat. Response time still depends on the model and connection.
+
+Live coaching uses finalized speech, a preparation brief built from the full source, and compact conversation memory. It asks for one specific unresolved detail supported by recent speech, preserves cue-card wording, and keeps the main answer stable while you speak. Brief listening tips do not erase the main recommendation.
+
+Microphone audio is locally filtered against timestamped meeting playback before Apple transcription. Likely remaining echo copies are hidden conservatively; **Show echo copies** in Transcript reveals them for inspection and editing. Original recognition text is retained. Headphones are still the most reliable way to prevent speaker leakage.
 
 **Notes** opens a full-height personal notepad. From the HUD, it restores the main chat with notes while keeping live guidance visible. **Pop out** returns to the overlay alone. Notes are saved with the call and available when you ask the chat to reference them. Drag the panel edge to widen it.
 

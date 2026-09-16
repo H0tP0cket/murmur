@@ -14,11 +14,12 @@ enum TranscriptIngestor {
         let provisional = call.transcript.filter { matches($0) && !$0.isFinal }
         var next = provisional.first ?? TranscriptSegment(sessionID: session, source: update.source, speaker: speaker, start: update.start, end: update.end, original: text)
         next.start = max(0, update.start); next.end = max(next.start, update.end)
-        next.original = text; next.isFinal = update.isFinal
+        next.original = text; next.isFinal = update.isFinal; next.confidence = update.confidence
         if next.speakerEdited != true { next.speaker = speaker }
         let replacedIDs = Set(provisional.map(\.id))
         call.transcript.removeAll { replacedIDs.contains($0.id) }
         call.transcript.append(next)
+        TranscriptQuality.reconcile(&call, session: session, around: update.start)
         let order = Dictionary(uniqueKeysWithValues: call.sessions.enumerated().map { ($0.element.id, $0.offset) })
         call.transcript.sort { lhs, rhs in lhs.sessionID == rhs.sessionID ? lhs.start < rhs.start : (order[lhs.sessionID] ?? 0) < (order[rhs.sessionID] ?? 0) }
     }

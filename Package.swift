@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [.executable(name: "murmur", targets: ["Oblivion"]), .executable(name: "MurMurMeetBridge", targets: ["MeetBridge"])],
     targets: [
-        .executableTarget(name: "Oblivion"),
+        .target(name: "CSpeexDSP", exclude: ["README.md"], publicHeadersPath: "include", cSettings: [.define("FLOATING_POINT"), .define("USE_SMALLFT"), .define("EXPORT", to: "")]),
+        .executableTarget(name: "Oblivion", dependencies: ["CSpeexDSP"]),
         .executableTarget(name: "MeetBridge"),
         .testTarget(name: "OblivionTests", dependencies: ["Oblivion"])
     ],
